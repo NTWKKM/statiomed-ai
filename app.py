@@ -78,6 +78,11 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
 app = App(app_ui, server, static_assets=Path(__file__).parent / "static")
 
 if __name__ == "__main__":
-    from shiny import run_app
+    import uvicorn
 
-    run_app("app:app", host="0.0.0.0", port=7860)
+    uvicorn.run(
+        "asgi:app",
+        host="0.0.0.0",
+        port=7860,
+        loop="asyncio",
+    )
