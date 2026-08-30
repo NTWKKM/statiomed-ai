@@ -889,3 +889,585 @@ def format_strobe_html_compact(checklist: ReportingChecklist) -> str:
     </div>
     """
     return html_content
+
+
+def create_tripod_ai_checklist() -> ReportingChecklist:
+    """
+    Create TRIPOD+AI 2024 checklist for clinical AI & machine learning prediction models.
+
+    References:
+        Collins GS, et al. (2024). TRIPOD+AI statement: updated guidance for reporting
+        clinical prediction models that use machine learning or artificial intelligence.
+        BMJ 2024; 385:e078378.
+    """
+    items = [
+        ChecklistItem(
+            "1",
+            "Title",
+            "Identify the study as developing, validating, or updating an AI/ML prediction model",
+            "Title and Abstract",
+        ),
+        ChecklistItem(
+            "2",
+            "Abstract",
+            "Summary of objectives, data sources, ML architecture, validation method, calibration, and discrimination",
+            "Title and Abstract",
+        ),
+        ChecklistItem(
+            "3a",
+            "Background",
+            "Clinical rationale and medical problem being addressed",
+            "Introduction",
+        ),
+        ChecklistItem(
+            "3b",
+            "Objectives",
+            "Specific objectives including intended clinical setting, user, and target population",
+            "Introduction",
+        ),
+        ChecklistItem(
+            "4a",
+            "Source of data",
+            "Study design, data sources (EHR, registries, trials), data collection period, and institutional settings",
+            "Methods",
+        ),
+        ChecklistItem(
+            "4b",
+            "Data provenance",
+            "Data provenance, preparation, de-identification, and data linkage protocols",
+            "Methods",
+        ),
+        ChecklistItem(
+            "5a",
+            "Eligibility criteria",
+            "Inclusion and exclusion criteria for study participants",
+            "Methods",
+        ),
+        ChecklistItem(
+            "5b",
+            "Participant flow",
+            "Details of participant selection and handling of multiple episodes/records",
+            "Methods",
+        ),
+        ChecklistItem(
+            "6a",
+            "Outcome definition",
+            "Definition of the outcome predicted, including how and when it was assessed",
+            "Methods",
+        ),
+        ChecklistItem(
+            "6b",
+            "Outcome blinding",
+            "Whether outcome assessors were blinded to predictor variables",
+            "Methods",
+        ),
+        ChecklistItem(
+            "7a",
+            "Predictors",
+            "Clearly define all candidate predictor variables, measurement timing, and units",
+            "Methods",
+        ),
+        ChecklistItem(
+            "7b",
+            "Feature engineering",
+            "Feature selection, transformation, scaling, encoding, and dimensionality reduction",
+            "Methods",
+        ),
+        ChecklistItem(
+            "8",
+            "Sample size",
+            "Rationale for sample size, number of events, and events per candidate parameter (EPV)",
+            "Methods",
+        ),
+        ChecklistItem(
+            "9",
+            "Missing data",
+            "Handling of missing data in predictors and outcome (e.g. MICE, complete-case)",
+            "Methods",
+        ),
+        ChecklistItem(
+            "10a",
+            "AI/ML Model architecture",
+            "Algorithm details (Logistic, XGBoost, Neural Nets), hyperparameters, and tuning protocol",
+            "Methods",
+        ),
+        ChecklistItem(
+            "10b",
+            "Validation strategy",
+            "Internal validation (cross-validation, bootstrapping) and external validation cohorts",
+            "Methods",
+        ),
+        ChecklistItem(
+            "11a",
+            "Discrimination",
+            "Concordance index (C-index) or AUC-ROC with 95% confidence intervals",
+            "Results",
+        ),
+        ChecklistItem(
+            "11b",
+            "Calibration",
+            "Calibration intercept and slope, calibration plots, and Brier score",
+            "Results",
+        ),
+        ChecklistItem(
+            "12",
+            "Decision Curve Analysis (DCA)",
+            "Net Benefit curves across relevant clinical decision threshold probabilities",
+            "Results",
+        ),
+        ChecklistItem(
+            "13",
+            "Subgroup & Fairness",
+            "Performance stratified across key clinical and demographic subgroups",
+            "Results",
+        ),
+        ChecklistItem(
+            "14",
+            "Model presentation",
+            "Format of final model (nomogram, score card, API, web calculator)",
+            "Results",
+        ),
+        ChecklistItem(
+            "15",
+            "Limitations",
+            "Study limitations, dataset biases, and generalizability bounds",
+            "Discussion",
+        ),
+        ChecklistItem(
+            "16",
+            "Interpretation",
+            "Overall clinical interpretation, net clinical utility, and potential harms",
+            "Discussion",
+        ),
+        ChecklistItem(
+            "17",
+            "Availability",
+            "Availability of code, model weights, and de-identified benchmark datasets",
+            "Other Information",
+        ),
+        ChecklistItem(
+            "18",
+            "Funding & Ethics",
+            "Funding sources, role of sponsors, and IRB/Ethics approvals",
+            "Other Information",
+        ),
+    ]
+    return ReportingChecklist(name="TRIPOD+AI 2024", items=items)
+
+
+def create_stard_checklist() -> ReportingChecklist:
+    """
+    Create STARD 2015 checklist for diagnostic test accuracy studies.
+
+    References:
+        Bossuyt PM, et al. (2015). STARD 2015: An Updated List of Essential Items
+        for Reporting Diagnostic Accuracy Studies. Radiology 277(3): 826-832.
+    """
+    items = [
+        ChecklistItem(
+            "1",
+            "Title",
+            "Identify the study as a diagnostic accuracy study in title",
+            "Title and Abstract",
+        ),
+        ChecklistItem(
+            "2",
+            "Abstract",
+            "Structured summary of background, methods, results, and conclusions",
+            "Title and Abstract",
+        ),
+        ChecklistItem(
+            "3",
+            "Scientific rationale",
+            "Scientific background and diagnostic problem, intended clinical role",
+            "Introduction",
+        ),
+        ChecklistItem(
+            "4",
+            "Study objectives",
+            "Study objectives and diagnostic hypotheses",
+            "Introduction",
+        ),
+        ChecklistItem(
+            "5",
+            "Study design",
+            "Prospective or retrospective diagnostic design",
+            "Methods",
+        ),
+        ChecklistItem(
+            "6",
+            "Participant eligibility",
+            "Inclusion/exclusion criteria, clinical setting, recruitment dates",
+            "Methods",
+        ),
+        ChecklistItem(
+            "7",
+            "Sampling method",
+            "Method of recruitment (consecutive, random, convenience)",
+            "Methods",
+        ),
+        ChecklistItem(
+            "8",
+            "Index test",
+            "Description of index test, technology, cut-offs, and measurement procedures",
+            "Methods",
+        ),
+        ChecklistItem(
+            "9",
+            "Reference standard",
+            "Reference standard definition, rationale, and diagnostic criteria",
+            "Methods",
+        ),
+        ChecklistItem(
+            "10",
+            "Blinding",
+            "Blinding between index test readers and reference standard assessors",
+            "Methods",
+        ),
+        ChecklistItem(
+            "11",
+            "Statistical methods",
+            "Methods for calculating Sensitivity, Specificity, +LR, -LR, DOR, AUC-ROC with 95% CIs",
+            "Methods",
+        ),
+        ChecklistItem(
+            "12",
+            "Indeterminate results",
+            "Handling of indeterminate, invalid, or missing test results",
+            "Methods",
+        ),
+        ChecklistItem(
+            "13",
+            "Participant flow",
+            "Flow of participants (numbers eligible, tested, verified by reference)",
+            "Results",
+        ),
+        ChecklistItem(
+            "14",
+            "Baseline demographics",
+            "Clinical and demographic characteristics of tested cohort",
+            "Results",
+        ),
+        ChecklistItem(
+            "15",
+            "Diagnostic 2x2 Table",
+            "Cross-tabulation of index test vs reference standard (TP, FP, FN, TN)",
+            "Results",
+        ),
+        ChecklistItem(
+            "16",
+            "Diagnostic Accuracy Metrics",
+            "Estimates of Sensitivity, Specificity, +LR, -LR, DOR with 95% CIs",
+            "Results",
+        ),
+        ChecklistItem(
+            "17",
+            "Fagan Nomogram / Post-test prob",
+            "Post-test probabilities calculated from pre-test probabilities and likelihood ratios",
+            "Results",
+        ),
+        ChecklistItem(
+            "18",
+            "Adverse events",
+            "Adverse events from performing index test or reference standard",
+            "Results",
+        ),
+        ChecklistItem(
+            "19",
+            "Limitations",
+            "Study limitations, verification bias, spectrum bias",
+            "Discussion",
+        ),
+        ChecklistItem(
+            "20",
+            "Clinical implications",
+            "Implications for clinical practice and diagnostic pathways",
+            "Discussion",
+        ),
+        ChecklistItem(
+            "21",
+            "Funding & Protocol",
+            "Registration, protocol location, and funding disclosures",
+            "Other Information",
+        ),
+    ]
+    return ReportingChecklist(name="STARD 2015", items=items)
+
+
+def create_prisma_checklist() -> ReportingChecklist:
+    """
+    Create PRISMA 2020 checklist for systematic reviews and meta-analyses.
+
+    References:
+        Page MJ, et al. (2021). The PRISMA 2020 statement: an updated guideline
+        for reporting systematic reviews. BMJ 2021; 372:n71.
+    """
+    items = [
+        ChecklistItem(
+            "1",
+            "Title",
+            "Identify the report as a systematic review and/or meta-analysis",
+            "Title",
+        ),
+        ChecklistItem(
+            "2",
+            "Abstract",
+            "Structured summary of PICO, search, synthesis, results, and conclusions",
+            "Abstract",
+        ),
+        ChecklistItem(
+            "3",
+            "Rationale",
+            "Rationale for review in context of existing knowledge",
+            "Introduction",
+        ),
+        ChecklistItem(
+            "4",
+            "Objectives",
+            "Explicit statement of questions addressed using PICO framework",
+            "Introduction",
+        ),
+        ChecklistItem(
+            "5",
+            "Eligibility criteria",
+            "Inclusion and exclusion criteria and study grouping rationale",
+            "Methods",
+        ),
+        ChecklistItem(
+            "6",
+            "Information sources",
+            "Databases searched, registries, dates searched, contact with authors",
+            "Methods",
+        ),
+        ChecklistItem(
+            "7",
+            "Search strategy",
+            "Full reproducible electronic search strategies with limits/filters",
+            "Methods",
+        ),
+        ChecklistItem(
+            "8",
+            "Selection process",
+            "Process of screening and selecting studies, independent reviewers",
+            "Methods",
+        ),
+        ChecklistItem(
+            "9",
+            "Data extraction",
+            "Data collection process, variables extracted, consensus mechanisms",
+            "Methods",
+        ),
+        ChecklistItem(
+            "10",
+            "Risk of bias in studies",
+            "Methods used to assess risk of bias (e.g. RoB 2, ROBINS-I)",
+            "Methods",
+        ),
+        ChecklistItem(
+            "11",
+            "Effect measures",
+            "Summary effect measures (OR, RR, HR, MD, SMD)",
+            "Methods",
+        ),
+        ChecklistItem(
+            "12",
+            "Synthesis methods",
+            "Statistical model (fixed vs random effects, REML, DerSimonian-Laird)",
+            "Methods",
+        ),
+        ChecklistItem(
+            "13",
+            "Heterogeneity assessment",
+            "Statistical heterogeneity assessment (Cochran Q, I^2, tau^2)",
+            "Methods",
+        ),
+        ChecklistItem(
+            "14",
+            "Publication bias",
+            "Methods for assessing publication/reporting bias (Funnel plot, Egger test)",
+            "Methods",
+        ),
+        ChecklistItem(
+            "15",
+            "Study selection results",
+            "PRISMA Flow Diagram (records identified, screened, excluded, included)",
+            "Results",
+        ),
+        ChecklistItem(
+            "16",
+            "Study characteristics",
+            "Summary table of included studies (population, interventions, outcomes)",
+            "Results",
+        ),
+        ChecklistItem(
+            "17",
+            "Meta-analysis & Forest plots",
+            "Forest plots displaying individual study effects and pooled estimate with 95% CI",
+            "Results",
+        ),
+        ChecklistItem(
+            "18",
+            "Risk of bias results",
+            "Risk of bias judgments across included studies",
+            "Results",
+        ),
+        ChecklistItem(
+            "19",
+            "Heterogeneity & Subgroups",
+            "Results of subgroup analysis, meta-regression, and sensitivity analysis",
+            "Results",
+        ),
+        ChecklistItem(
+            "20",
+            "Certainty of evidence",
+            "GRADE assessment of certainty of evidence",
+            "Discussion",
+        ),
+        ChecklistItem(
+            "21",
+            "Limitations",
+            "Limitations of included evidence and review processes",
+            "Discussion",
+        ),
+        ChecklistItem(
+            "22",
+            "Registration & Protocol",
+            "PROSPERO registration number and protocol amendments",
+            "Other Information",
+        ),
+        ChecklistItem(
+            "23",
+            "Funding & Conflicts",
+            "Funding sources and conflicts of interest",
+            "Other Information",
+        ),
+    ]
+    return ReportingChecklist(name="PRISMA 2020", items=items)
+
+
+def auto_populate_tripod_ai(analysis_metadata: dict[str, Any]) -> ReportingChecklist:
+    """
+    Auto-populates TRIPOD+AI (2024) checklist from prediction model metadata.
+    """
+    checklist = create_tripod_ai_checklist()
+    c_index = analysis_metadata.get("c_index")
+    brier_score = analysis_metadata.get("brier_score")
+    calib_slope = analysis_metadata.get("calibration_slope")
+    calib_intercept = analysis_metadata.get("calibration_intercept")
+    has_dca = analysis_metadata.get("has_dca", False)
+    n_total = analysis_metadata.get("n_total", 0)
+    model_name = analysis_metadata.get("model_name", "Multivariable Model")
+
+    if n_total > 0:
+        checklist.update_item(
+            "5a", ChecklistStatus.COMPLETE, notes=f"Cohort sample size: N={n_total}"
+        )
+    if model_name:
+        checklist.update_item(
+            "10a", ChecklistStatus.COMPLETE, notes=f"Architecture: {model_name}"
+        )
+    if c_index is not None:
+        checklist.update_item(
+            "11a", ChecklistStatus.COMPLETE, notes=f"C-index: {c_index:.3f} (95% CI)"
+        )
+    if calib_slope is not None or calib_intercept is not None:
+        notes = (
+            f"Calibration slope={calib_slope:.2f}, intercept={calib_intercept:.2f}"
+            if calib_slope
+            else ""
+        )
+        if brier_score is not None:
+            notes += f", Brier score={brier_score:.3f}"
+        checklist.update_item("11b", ChecklistStatus.COMPLETE, notes=notes)
+    if has_dca:
+        checklist.update_item(
+            "12",
+            ChecklistStatus.COMPLETE,
+            notes="Decision Curve Analysis (Net Benefit curve) generated",
+        )
+
+    return checklist
+
+
+def auto_populate_stard(analysis_metadata: dict[str, Any]) -> ReportingChecklist:
+    """
+    Auto-populates STARD 2015 checklist from diagnostic test accuracy metadata.
+    """
+    checklist = create_stard_checklist()
+    sensitivity = analysis_metadata.get("sensitivity")
+    specificity = analysis_metadata.get("specificity")
+    auc = analysis_metadata.get("auc")
+    plr = analysis_metadata.get("positive_lr")
+    nlr = analysis_metadata.get("negative_lr")
+    has_fagan = analysis_metadata.get("has_fagan", False)
+    tp = analysis_metadata.get("tp")
+    fp = analysis_metadata.get("fp")
+    fn = analysis_metadata.get("fn")
+    tn = analysis_metadata.get("tn")
+
+    if tp is not None and fp is not None and fn is not None and tn is not None:
+        checklist.update_item(
+            "15",
+            ChecklistStatus.COMPLETE,
+            notes=f"2x2 Table: TP={tp}, FP={fp}, FN={fn}, TN={tn} (Total N={tp + fp + fn + tn})",
+        )
+
+    if sensitivity is not None and specificity is not None:
+        notes = f"Sensitivity: {sensitivity:.1%}, Specificity: {specificity:.1%}"
+        if plr is not None and nlr is not None:
+            notes += f", +LR: {plr:.2f}, -LR: {nlr:.2f}"
+        checklist.update_item("16", ChecklistStatus.COMPLETE, notes=notes)
+
+    if auc is not None:
+        checklist.update_item(
+            "11", ChecklistStatus.COMPLETE, notes=f"AUC-ROC: {auc:.3f} with 95% CI"
+        )
+
+    if has_fagan:
+        checklist.update_item(
+            "17",
+            ChecklistStatus.COMPLETE,
+            notes="Fagan nomogram and post-test probabilities calculated",
+        )
+
+    return checklist
+
+
+def auto_populate_consort(analysis_metadata: dict[str, Any]) -> ReportingChecklist:
+    """
+    Auto-populates CONSORT 2010 checklist from RCT metadata.
+    """
+    checklist = create_consort_checklist()
+    n_assigned = analysis_metadata.get("n_assigned", 0)
+    n_control = analysis_metadata.get("n_control", 0)
+    n_intervention = analysis_metadata.get("n_intervention", 0)
+    primary_effect = analysis_metadata.get("primary_effect", "")
+    has_sample_size = analysis_metadata.get("has_sample_size", False)
+
+    if n_assigned > 0:
+        checklist.update_item(
+            "13a",
+            ChecklistStatus.COMPLETE,
+            notes=f"Assigned N={n_assigned} (Control={n_control}, Intervention={n_intervention})",
+        )
+        checklist.update_item(
+            "16",
+            ChecklistStatus.COMPLETE,
+            notes=f"Analyzed N={n_assigned} by Intention-to-Treat",
+        )
+
+    if has_sample_size:
+        checklist.update_item(
+            "7a",
+            ChecklistStatus.COMPLETE,
+            notes="Sample size calculated with power 80% and alpha 0.05",
+        )
+
+    if primary_effect:
+        checklist.update_item(
+            "17a",
+            ChecklistStatus.COMPLETE,
+            notes=f"Primary outcome estimate: {primary_effect}",
+        )
+
+    return checklist

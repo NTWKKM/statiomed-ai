@@ -1,0 +1,13 @@
+### Results: Baseline Patient Characteristics (Table 1)
+
+A total of {{ n_total | default(0) }} patients were included in the primary analysis ({{ n_group1 | default(0) }} in {{ group1_name | default("Group 1") }} and {{ n_group2 | default(0) }} in {{ group2_name | default("Group 2") }}). Baseline demographic and clinical characteristics are summarized in Table 1.
+
+{% for var in table1_rows | default([]) %}
+- **{{ var.name }}**: {{ group1_name | default("Group 1") }} {{ var.stats_g1 }} vs {{ group2_name | default("Group 2") }} {{ var.stats_g2 }} (SMD = {{ var.smd }}{% if var.p_value %}, P = {{ var.p_value }}{% endif %}).
+{% endfor %}
+
+{% if max_smd is defined and max_smd < 0.10 %}
+All baseline covariates demonstrated excellent balance between study groups, with all Standardized Mean Differences (SMD) remaining below the pre-specified 0.10 threshold.
+{% elif max_smd is defined %}
+Notable covariate imbalances (|SMD| $\ge 0.10$) were identified and subsequently adjusted for in multivariable regression models.
+{% endif %}

@@ -1,0 +1,26 @@
+## Statistical Analysis Plan (SAP)
+**Study Title:** {{ study_title | default("Clinical Investigation Protocol") }}
+**Target Journal / Guideline:** {{ guideline | default("CONSORT 2010 / ICMJE Recommendations") }}
+**Date of SAP Formulation:** {{ date | default("2026-08-30") }}
+**Principal Investigator / Persona:** StatioMed AI Clinical Tech Lead
+
+---
+
+### 1. Study Objectives & Hypothesis
+- **Primary Objective:** {{ primary_objective | default("Evaluate the comparative efficacy and clinical safety of the intervention.") }}
+- **Primary Endpoint:** {{ primary_endpoint | default("Time from randomization to first occurrence of composite outcome.") }}
+- **Secondary Endpoints:** {{ secondary_endpoints | default("All-cause mortality, functional status at 12 months, adverse clinical events.") }}
+
+### 2. Study Design & Randomization
+- **Trial Design:** {{ study_design | default("Parallel-group, double-blind randomized controlled trial (1:1 allocation ratio).") }}
+- **Target Enrollment:** Total $N = {{ n_total | default(500) }}$ participants (${{ n_control | default(250) }}$ control, ${{ n_intervention | default(250) }}$ intervention).
+- **Sample Size Rationale:** Providing {{ power_pct | default("80") }}% power to detect an effect size at a two-sided significance level of $\alpha = {{ alpha | default("0.05") }}$, assuming a {{ dropout_pct | default("15") }}% loss to follow-up.
+
+### 3. Statistical Methodology
+- **Analysis Populations:** 
+  - **Intention-to-Treat (ITT) Population:** Primary efficacy analyses will include all randomized patients according to assigned treatment.
+  - **Per-Protocol (PP) Population:** Sensitivity analysis including patients completing $\ge 80$% prescribed regimen.
+- **Baseline Characteristics (Table 1):** Continuous variables reported as Mean (SD) if normally distributed or Median (IQR: 25th-75th percentiles) if skewed. Categorical variables reported as counts (percentages). Covariate balance evaluated via Austin (2009) Standardized Mean Differences (SMD), with $|SMD| < 0.10$ indicating negligible imbalance.
+- **Primary Outcome Analysis:** Kaplan-Meier survival estimators with two-sided log-rank test. Hazard ratios (HR) and 95% confidence intervals estimated via multivariable Cox proportional hazards regression utilizing Efron's tie-handling method. Proportional hazards assumption verified via Grambsch-Therneau Schoenfeld residual tests.
+- **Missing Data Handling:** Little's MCAR test evaluated. Missingness $> 5$% handled via Multiple Imputation by Chained Equations (MICE, $M = 20$ imputations) with Barnard-Rubin (1999) small-sample degrees of freedom adjustment.
+- **Significance Threshold:** Two-sided $P < 0.05$ for primary hypothesis; False Discovery Rate (Benjamini-Hochberg) applied for secondary endpoints.

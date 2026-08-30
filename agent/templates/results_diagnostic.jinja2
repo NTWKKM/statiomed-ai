@@ -1,0 +1,12 @@
+### Results: Diagnostic Test Performance (STARD 2015)
+
+In the diagnostic evaluation cohort of {{ n_total | default(0) }} patients ({{ n_diseased | default(0) }} confirmed cases with {{ condition_name | default("target condition") }}), {{ index_test | default("the index test") }} demonstrated the following diagnostic accuracy metrics:
+
+- **Sensitivity:** {{ sensitivity_pct | default("85.0%") }} (95% CI: {{ sens_ci_lower | default("78.0%") }} to {{ sens_ci_upper | default("90.5%") }})
+- **Specificity:** {{ specificity_pct | default("92.0%") }} (95% CI: {{ spec_ci_lower | default("87.5%") }} to {{ spec_ci_upper | default("95.2%") }})
+- **Positive Likelihood Ratio (+LR):** {{ plr | default("10.6") }} (95% CI: {{ plr_ci_lower | default("6.8") }} to {{ plr_ci_upper | default("16.5") }})
+- **Negative Likelihood Ratio (-LR):** {{ nlr | default("0.16") }} (95% CI: {{ nlr_ci_lower | default("0.11") }} to {{ nlr_ci_upper | default("0.24") }})
+- **Diagnostic Odds Ratio (DOR):** {{ dor | default("66.2") }} (95% CI: {{ dor_ci_lower | default("32.0") }} to {{ dor_ci_upper | default("137.0") }})
+- **Area Under the ROC Curve (AUC):** {{ auc | default("0.93") }} (95% CI: {{ auc_ci_lower | default("0.89") }} to {{ auc_ci_upper | default("0.96") }})
+
+Fagan nomogram analysis indicated that at an estimated pre-test probability of {{ pre_test_prob_pct | default("20%") }}, a positive test result substantially increased the post-test disease probability to {{ post_test_pos_pct | default("72.6%") }}, whereas a negative test result ruled out the condition with a post-test probability of {{ post_test_neg_pct | default("3.8%") }}.

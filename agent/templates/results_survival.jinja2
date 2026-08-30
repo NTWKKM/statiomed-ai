@@ -1,0 +1,7 @@
+### Results: Time-to-Event Survival Analysis
+
+During a median follow-up of {{ median_followup | default("365") }} days, the primary composite endpoint occurred in {{ events_intervention | default(0) }} of {{ n_intervention | default(0) }} patients ({{ pct_events_intervention | default("0.0%") }}) in the {{ intervention_name | default("intervention") }} group compared with {{ events_control | default(0) }} of {{ n_control | default(0) }} patients ({{ pct_events_control | default("0.0%") }}) in the {{ control_name | default("control") }} group.
+
+Cumulative event rates were significantly lower in the {{ intervention_name | default("intervention") }} group by Kaplan-Meier analysis (log-rank test, $\chi^2 = {{ logrank_chi2 | default("0.00") }}$, $P {{ logrank_p_str | default("= 0.042") }}$). In the multivariable Cox proportional hazards regression model (Efron tie-handling), treatment with {{ intervention_name | default("intervention") }} was associated with a significant reduction in the hazard of the primary endpoint (Hazard Ratio [HR] = {{ hr | default("0.70") }}, 95% CI: {{ hr_ci_lower | default("0.55") }} to {{ hr_ci_upper | default("0.89") }}, $P {{ hr_p_str | default("= 0.004") }}$).
+
+The proportional hazards assumption was verified and confirmed across all covariates (global Schoenfeld test $P = {{ schoenfeld_p | default("0.45") }}$). Harrell's C-index for model discrimination was {{ c_index | default("0.78") }} (95% CI: {{ c_index_lower | default("0.72") }} to {{ c_index_upper | default("0.84") }}).

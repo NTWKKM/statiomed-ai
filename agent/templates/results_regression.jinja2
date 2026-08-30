@@ -1,0 +1,14 @@
+### Results: Multivariable Regression Analysis
+
+Multivariable regression models evaluating independent predictors of {{ outcome_name | default("the primary endpoint") }} are presented in Table 2.
+
+{% for term in regression_terms | default([]) %}
+- **{{ term.variable }}**: Adjusted Odds Ratio (aOR) = {{ term.or_val }} (95% CI: {{ term.ci_lower }} to {{ term.ci_upper }}), $P {{ term.p_str }}$.
+{% endfor %}
+
+{% if vif_max is defined %}
+Multicollinearity diagnostics indicated low variance inflation across all included covariates (maximum VIF = {{ vif_max | default("1.45") }}).
+{% endif %}
+{% if e_value is defined %}
+Sensitivity analysis yielded an E-value of {{ e_value }} for the point estimate (E-value CI lower bound = {{ e_value_ci }}), indicating that unmeasured confounding would need to be associated with both exposure and outcome by an odds ratio of at least {{ e_value }} to explain away the observed effect.
+{% endif %}

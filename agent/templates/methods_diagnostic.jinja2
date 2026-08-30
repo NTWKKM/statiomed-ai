@@ -1,0 +1,5 @@
+### Methods: Diagnostic Accuracy (STARD 2015 Compliant)
+
+Diagnostic test accuracy of {{ index_test | default("the index test") }} was evaluated against {{ reference_standard | default("the reference standard") }} in {{ n_total | default(0) }} enrolled patients. True positive (TP), false positive (FP), false negative (FN), and true negative (TN) counts were extracted into standard 2x2 contingency tables.
+
+Diagnostic accuracy parameters including Sensitivity, Specificity, Positive Likelihood Ratio (+LR), Negative Likelihood Ratio (-LR), and Diagnostic Odds Ratio (DOR) were calculated with exact binomial 95% confidence intervals (Wilson score intervals). Receiver Operating Characteristic (ROC) curves were constructed, and the Area Under the Curve (AUC-ROC) was calculated via trapezoidal integration with DeLong 95% CIs. Clinical utility and post-test disease probabilities were modeled using Fagan nomograms across low, moderate, and high pre-test probability clinical scenarios.
