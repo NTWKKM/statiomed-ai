@@ -1,10 +1,12 @@
 ---
-title: PatchStat
+title: StatioMed AI
 emoji: 🏥
 colorFrom: indigo
 colorTo: blue
-sdk: docker
-app_port: 7860
+sdk: gradio
+sdk_version: 6.26.0
+python_version: "3.12"
+app_file: app.py
 pinned: false
 license: apache-2.0
 ---
