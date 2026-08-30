@@ -108,6 +108,9 @@ with gr.Blocks(
         'allow="camera; microphone; clipboard-read; clipboard-write;"></iframe>'
     )
 
+# Disable Node.js SSR proxy so Python FastAPI handles port 7860 directly
+os.environ["GRADIO_SSR_MODE"] = "False"
+
 # Export ASGI app instance for direct ASGI servers / health checks
 app = demo.app
 
@@ -118,6 +121,7 @@ if __name__ == "__main__":
     demo.queue().launch(
         server_name="0.0.0.0",
         server_port=port,
+        ssr_mode=False,
         theme=gr.themes.Base(),
         css=custom_css,
         allowed_paths=["/shiny", str(STATIC_DIR)],
