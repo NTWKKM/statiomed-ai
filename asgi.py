@@ -62,33 +62,32 @@ App.create_app = _custom_create_app
 
 # Build Top-Level Gradio Blocks UI (Required by Hugging Face ZeroGPU Supervisor)
 custom_css = """
-body, html {
+html, body {
     margin: 0 !important;
     padding: 0 !important;
     width: 100% !important;
     height: 100% !important;
-    background-color: #ffffff !important;
+    overflow: hidden !important;
+    background-color: #f8fafc !important;
 }
-footer {
-    display: none !important;
-}
-.gradio-container {
+footer, header, .gradio-container {
     padding: 0 !important;
     margin: 0 !important;
     max-width: 100% !important;
     width: 100% !important;
     height: 100vh !important;
     overflow: hidden !important;
-    background-color: #ffffff !important;
 }
-iframe {
+.statiomed-frame {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
     width: 100vw !important;
     height: 100vh !important;
+    z-index: 999999 !important;
     border: none !important;
-    display: block !important;
     margin: 0 !important;
     padding: 0 !important;
-    background-color: #ffffff !important;
 }
 """
 
@@ -101,20 +100,15 @@ with gr.Blocks(
     _probe_out = gr.Textbox(visible=False)
     _probe_btn.click(fn=_zerogpu_probe_fn, inputs=_probe_inp, outputs=_probe_out)
 
-    # Full-screen responsive iframe hosting the mounted Shiny for Python application
+    # Full-screen responsive fixed iframe hosting the mounted Shiny for Python application
     gr.HTML(
-        '<iframe src="/shiny/" '
-        'style="width: 100vw; height: 100vh; border: none; overflow: hidden; display: block; background: #ffffff;" '
-        'allow="camera; microphone; clipboard-read; clipboard-write;"></iframe>'
+        '<iframe class="statiomed-frame" src="/shiny/" '
+        'style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; border: none; z-index: 999999;" '
+        'allow="camera; microphone; clipboard-read; clipboard-write; display-capture;"></iframe>'
     )
 
 # Disable Node.js SSR proxy so Python FastAPI handles port 7860 directly
 os.environ["GRADIO_SSR_MODE"] = "False"
-
-# Mount on demo.app initial reference as fallback
-if STATIC_DIR.exists():
-    demo.app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-demo.app.mount("/shiny", shiny_app, name="shiny")
 
 # Export ASGI app instance for direct ASGI servers / health checks
 app = demo.app
