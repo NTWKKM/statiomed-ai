@@ -97,9 +97,9 @@ with gr.Blocks(
         """
         <style>
             footer {display: none !important;}
-            .gradio-container {padding: 0 !important; max-width: 100% !important; margin: 0 !important;}
-            body, html {margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%;}
-            iframe {position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; border: none; margin: 0; padding: 0; z-index: 99999;}
+            .gradio-container {padding: 0 !important; max-width: 100% !important; margin: 0 !important; background: #ffffff !important;}
+            body, html {margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #ffffff !important;}
+            iframe {position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; border: none; margin: 0; padding: 0; z-index: 99999; background: #ffffff;}
         </style>
         <iframe
             src="/shiny/"
@@ -112,4 +112,4 @@ with gr.Blocks(
 app = demo.app = gradio_app
 
 if __name__ == "__main__":
-    demo.launch(_app=gradio_app)
+    demo.launch(_app=gradio_app, ssr_mode=False)
