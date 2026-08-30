@@ -67,27 +67,13 @@ html, body {
     padding: 0 !important;
     width: 100% !important;
     height: 100% !important;
-    overflow: hidden !important;
-    background-color: #f8fafc !important;
+    background-color: #0b0f19 !important;
 }
 footer, header, .gradio-container {
     padding: 0 !important;
     margin: 0 !important;
     max-width: 100% !important;
     width: 100% !important;
-    height: 100vh !important;
-    overflow: hidden !important;
-}
-.statiomed-frame {
-    position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
-    width: 100vw !important;
-    height: 100vh !important;
-    z-index: 999999 !important;
-    border: none !important;
-    margin: 0 !important;
-    padding: 0 !important;
 }
 """
 
@@ -100,11 +86,35 @@ with gr.Blocks(
     _probe_out = gr.Textbox(visible=False)
     _probe_btn.click(fn=_zerogpu_probe_fn, inputs=_probe_inp, outputs=_probe_out)
 
-    # Full-screen responsive fixed iframe hosting the mounted Shiny for Python application
+    # Seamless application gateway card with instant auto-redirect to mounted Shiny sub-app
     gr.HTML(
-        '<iframe class="statiomed-frame" src="/shiny/" '
-        'style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; border: none; z-index: 999999;" '
-        'allow="camera; microphone; clipboard-read; clipboard-write; display-capture;"></iframe>'
+        """
+        <div style="font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 85vh; color: #f8fafc; text-align: center; padding: 20px;">
+            <div style="background: rgba(30, 41, 59, 0.9); border: 1px solid #334155; border-radius: 16px; padding: 36px 44px; max-width: 520px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);">
+                <div style="font-size: 52px; margin-bottom: 16px;">🏥</div>
+                <h2 style="font-size: 24px; font-weight: 700; margin: 0 0 8px 0; color: #ffffff;">StatioMed AI</h2>
+                <p style="font-size: 14px; color: #94a3b8; margin: 0 0 24px 0; line-height: 1.5;">
+                    Clinical Research & Biostatistical Co-Pilot
+                </p>
+                <a href="./shiny/" target="_self" style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 600; padding: 12px 28px; border-radius: 8px; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);">
+                    🚀 Open Application
+                </a>
+                <p style="font-size: 12px; color: #64748b; margin: 16px 0 0 0;">
+                    Launching environment...
+                </p>
+            </div>
+        </div>
+        <script>
+            (function() {
+                try {
+                    var p = window.location.pathname.replace(/\\/+$/, '');
+                    window.location.replace(p + '/shiny/');
+                } catch(e) {
+                    window.location.href = './shiny/';
+                }
+            })();
+        </script>
+        """
     )
 
 # Disable Node.js SSR proxy so Python FastAPI handles port 7860 directly
