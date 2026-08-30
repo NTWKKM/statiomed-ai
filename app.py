@@ -54,10 +54,16 @@ theme = gr.themes.Soft(
     neutral_hue="slate",
     font=[
         gr.themes.GoogleFont("Inter"),
-        "ui-sans-serif",
-        "-apple-system",
-        "system-ui",
-        "sans-serif",
+        gr.themes.Font("ui-sans-serif"),
+        gr.themes.Font("-apple-system"),
+        gr.themes.Font("system-ui"),
+        gr.themes.Font("sans-serif"),
+    ],
+    font_mono=[
+        gr.themes.GoogleFont("JetBrains Mono"),
+        gr.themes.Font("ui-monospace"),
+        gr.themes.Font("Consolas"),
+        gr.themes.Font("monospace"),
     ],
 ).set(
     body_background_fill="#f8fafc",
