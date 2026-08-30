@@ -29,6 +29,7 @@ except ImportError:
 
 
 import gradio as gr
+from gradio.routes import App
 from starlette.staticfiles import StaticFiles
 
 from app import shiny_app
@@ -43,6 +44,21 @@ logger = logging.getLogger(__name__)
 
 # Static files directory
 STATIC_DIR = Path(__file__).parent / "static"
+
+# Patch Gradio's App.create_app to mount Shiny & static files BEFORE middleware compilation
+_orig_create_app = App.create_app
+
+
+@staticmethod
+def _custom_create_app(*args, **kwargs):
+    app = _orig_create_app(*args, **kwargs)
+    if STATIC_DIR.exists():
+        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.mount("/shiny", shiny_app, name="shiny")
+    return app
+
+
+App.create_app = _custom_create_app
 
 # Build Top-Level Gradio Blocks UI (Required by Hugging Face ZeroGPU Supervisor)
 custom_css = """
@@ -91,27 +107,6 @@ with gr.Blocks(
         'style="width: 100vw; height: 100vh; border: none; overflow: hidden; display: block; background: #ffffff;" '
         'allow="camera; microphone; clipboard-read; clipboard-write;"></iframe>'
     )
-
-# Wrap demo.launch to guarantee Shiny is mounted on the active FastAPI server
-_orig_launch = demo.launch
-
-
-def custom_launch(*args, **kwargs):
-    kwargs.setdefault("ssr_mode", False)
-    app, local_url, share_url = _orig_launch(*args, **kwargs)
-    if STATIC_DIR.exists():
-        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-    app.mount("/shiny", shiny_app, name="shiny")
-    return app, local_url, share_url
-
-
-demo.launch = custom_launch
-
-# Mount on demo.app initial reference as fallback
-if STATIC_DIR.exists():
-    demo.app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
-demo.app.mount("/shiny", shiny_app, name="shiny")
 
 # Export ASGI app instance for direct ASGI servers / health checks
 app = demo.app
