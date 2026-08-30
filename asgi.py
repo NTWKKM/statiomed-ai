@@ -50,10 +50,9 @@ async def lifespan(app: Starlette):
     logger.info("👋 Shutting down application...")
 
 
-# Routes: Static files first, then Shiny app at root
+# Routes: Static files first
 routes = [
     Mount("/static", app=StaticFiles(directory=str(STATIC_DIR)), name="static"),
-    Mount("/", app=shiny_app, name="shiny"),
 ]
 
 # Middleware stack
@@ -91,6 +90,8 @@ with gr.Blocks(title="StatioMed AI ZeroGPU Bridge") as _gradio_probe:
     _btn.click(fn=_zerogpu_probe_fn, inputs=_inp, outputs=_out)
 
 app = gr.mount_gradio_app(base_app, _gradio_probe, path="/_gradio")
+# Mount Shiny app at root last, so it acts as a catch-all
+app.mount("/", shiny_app, name="shiny")
 
 # Development server
 if __name__ == "__main__":
@@ -103,6 +104,5 @@ if __name__ == "__main__":
         "asgi:app",
         host="0.0.0.0",
         port=port,
-        reload=True,
         log_level="info",
     )
