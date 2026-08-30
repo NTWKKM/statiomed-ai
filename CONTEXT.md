@@ -6,12 +6,12 @@
 
 ---
 
-## ADR-001: Gradio SDK Host for Shiny for Python ASGI Application
+## ADR-001: Pure Native Gradio 6.x Blocks Architecture on Hugging Face Spaces
 
-- **Status**: Accepted
-- **Context**: Hugging Face Spaces free tier offers `gradio`, `streamlit`, `docker`, and `static` SDKs. Shiny for Python provides robust reactive UI and stateful biostatistical widgets, but does not have a native HF SDK tag.
-- **Decision**: Configure `sdk: gradio` and `sdk_version: 6.26.0` in `README.md` metadata, wrap Shiny app inside an ASGI Starlette gateway in `asgi.py` / `app.py`, and bind to `port: 7860`.
-- **Consequences**: Enables free hosting on Hugging Face Spaces while retaining full Shiny for Python reactivity, static file serving, and GZip compression.
+- **Status**: Accepted (Supercedes hybrid ASGI bridge)
+- **Context**: Hugging Face Spaces provides first-class support, ZeroGPU hardware acceleration (`@spaces.GPU`), iframe embed stability, and native client APIs for Gradio applications. The previous hybrid ASGI bridge (mounting Shiny inside Gradio with JS redirects) suffered from redirect loops and WebSocket session drops on sleep/wake cycles.
+- **Decision**: Refactor the frontend presentation layer into modular, deep Gradio 6.x Blocks views (`views/`) with session-isolated `gr.State(AppState())` containers, while preserving 100% of deterministic biostatistical computation in `utils/`.
+- **Consequences**: Instant cold boot on Hugging Face Spaces without redirect loops, seamless ZeroGPU integration, robust mobile & iframe responsiveness, and cleaner dependency tree.
 
 ---
 
@@ -39,12 +39,3 @@
 - **Context**: Generative LLMs hallucinate numerical statistics, p-values, and confidence intervals when performing raw calculations.
 - **Decision**: LLMs are restricted to study planning and qualitative synthesis. All statistical analyses (Cox PH, Kaplan-Meier, Logistic Regression, Sample Size) are executed deterministically using `statsmodels`, `lifelines`, `scikit-learn`, and `pingouin`. Manuscript Methods and Results sections are rendered using Jinja2 templates directly from computed dictionary results.
 - **Consequences**: Zero mathematical hallucination, full reproducibility against benchmark standard (R `survival::coxph`), and conformity with SAMPL / EQUATOR guidelines.
-
----
-
-## ADR-005: Starlette Version Constraint Alignment (<2.0.0)
-
-- **Status**: Accepted
-- **Context**: Gradio 6.26.0 requires `starlette>=1.0.1,<2.0`. A pinned constraint `starlette<1.0.0` caused build failure on Hugging Face Spaces Docker environment.
-- **Decision**: Loosen starlette constraint to `starlette>=0.49.1,<2.0.0` across `requirements.txt` and `requirements-prod.txt`.
-- **Consequences**: Resolves build conflicts across Gradio 6.x, FastAPI, and Shiny for Python seamlessly.

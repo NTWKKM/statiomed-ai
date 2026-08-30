@@ -4,9 +4,9 @@
 
 [project]
 name = "statiomed-ai"
-version = "0.1.0"
+version = "0.2.0"
 requires-python = ">=3.12"
-description = "Agentic Medical Statistical Analysis & Study Design Platform built with Shiny for Python and smolagents"
+description = "Agentic Medical Statistical Analysis & Study Design Platform built natively with Gradio 6.x and smolagents"
 authors = [
     { name = "StatioMed Team" }
 ]

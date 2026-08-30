@@ -1,7 +1,7 @@
 # 🏗️ StatioMed AI — System Architecture & Technical Specifications
 
 > **Role & Domain**: Agentic Medical Statistical Analysis, Study Design & Manuscript Generation Engine  
-> **Target Environment**: Local Hospital Workstation (Zero-PHI CLI) + Cloud / On-Prem ASGI Hosting (Hugging Face Spaces / Docker)
+> **Target Environment**: Local Hospital Workstation (Zero-PHI CLI) + Cloud / On-Prem Native Gradio Hosting (Hugging Face Spaces / Docker)
 
 ---
 
@@ -23,15 +23,17 @@
                ▼
 [ Cloud / Production Boundary: Hugging Face Spaces / On-Prem ]
 ┌─────────────────────────────────────────────────────────────┐
-│  ASGI Gateway (asgi.py / Starlette + GZip + Static Files)   │
-│  └─► Shiny for Python Reactive Web UI (app.py, tabs/*)      │
-│        ├─► Tab 1: AI Co-Pilot (smolagents AgentRunner)      │
-│        ├─► Tab 2: Data Profiler & Missingness Inspection    │
-│        ├─► Tab 3: Survival Analysis (Kaplan-Meier / Cox PH) │
-│        ├─► Tab 4: Core Regression (Linear/Logistic/Poisson) │
-│        ├─► Tab 5: Sample Size & Power Calculation           │
-│        ├─► Tab 6: Baseline Matching & Table 1 Generation    │
-│        └─► Tab 7: Configuration & Model Settings            │
+│  Pure Native Gradio 6.x Blocks UI (app.py, views/*)         │
+│  ├─► Global Session State (core.state.AppState via gr.State)│
+│  ├─► Tab 1: AI Co-Pilot (smolagents & ZeroGPU @spaces.GPU)  │
+│  ├─► Tab 2: Data Profiler & Missingness Inspection          │
+│  ├─► Tab 3: Survival Analysis (Kaplan-Meier / Cox PH)       │
+│  ├─► Tab 4: Core Regression (Linear/Logistic/Poisson)       │
+│  ├─► Tab 5: Sample Size & Power Calculation                 │
+│  ├─► Tab 6: Baseline Matching & Table 1 Generation          │
+│  ├─► Tab 7: Diagnostic Accuracy & Fagan Nomogram            │
+│  ├─► Tab 8: Meta-Analysis Synthesis & EQUATOR Audits        │
+│  └─► Tab 9: Configuration & System Diagnostics              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -85,5 +87,5 @@ GitHub Repository (NTWKKM/statiomed-ai)
 Hugging Face Spaces (ntwkkm/statiomed-ai)
        │
        ▼
-Container Build & ASGI Execution (Port 7860)
+Native Gradio 6.x Blocks Execution (Port 7860)
 ```

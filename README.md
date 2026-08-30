@@ -6,7 +6,7 @@ colorTo: blue
 sdk: gradio
 sdk_version: 6.26.0
 python_version: "3.12"
-app_file: asgi.py
+app_file: app.py
 pinned: false
 license: apache-2.0
 ---
@@ -71,7 +71,7 @@ uv pip install -r requirements.txt
 pytest tests/ -v
 
 # 5. Launch web application
-shiny run app.py --port 7860 --reload
+python app.py
 ```
 
 ---
