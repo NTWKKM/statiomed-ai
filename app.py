@@ -75,13 +75,47 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
     tab_settings.settings_server("settings")
 
 
-app = App(app_ui, server, static_assets=Path(__file__).parent / "static")
+# Create Shiny App
+shiny_app = App(app_ui, server, static_assets=Path(__file__).parent / "static")
+
+# Create Root ASGI (FastAPI) Application with Gradio Mount for Hugging Face Spaces compatibility
+from fastapi import FastAPI
+from starlette.staticfiles import StaticFiles
+import gradio as gr
+
+root_app = FastAPI(title="StatioMed AI")
+STATIC_DIR = Path(__file__).parent / "static"
+if STATIC_DIR.exists():
+    root_app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+root_app.mount("/shiny", shiny_app)
+
+with gr.Blocks(
+    title="StatioMed AI — Clinical Research & Biostatistical Co-Pilot"
+) as demo:
+    gr.HTML(
+        """
+        <style>
+            footer {display: none !important;}
+            .gradio-container {padding: 0 !important; max-width: 100% !important; margin: 0 !important;}
+            body, html {margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%;}
+            iframe {position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; border: none; margin: 0; padding: 0; z-index: 99999;}
+        </style>
+        <iframe
+            src="/shiny/"
+            allow="accelerometer; autoplay; camera; clipboard-read; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowfullscreen>
+        </iframe>
+        """
+    )
+
+app = gr.mount_gradio_app(root_app, demo, path="/")
 
 if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        "asgi:app",
+        app,
         host="0.0.0.0",
         port=7860,
         loop="asyncio",

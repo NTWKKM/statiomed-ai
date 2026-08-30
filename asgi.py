@@ -25,7 +25,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.routing import Mount
 from starlette.staticfiles import StaticFiles
 
-from app import app as shiny_app
+from app import shiny_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
