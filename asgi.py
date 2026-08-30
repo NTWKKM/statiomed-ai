@@ -77,6 +77,15 @@ footer, header, .gradio-container {
 }
 """
 
+REDIRECT_JS = r"""() => {
+    try {
+        var p = window.location.pathname.replace(/\/+$/, '');
+        window.location.replace(p + '/shiny/');
+    } catch(e) {
+        window.location.href = './shiny/';
+    }
+}"""
+
 with gr.Blocks(
     title="StatioMed AI — Clinical Research & Biostatistical Co-Pilot",
 ) as demo:
@@ -96,7 +105,7 @@ with gr.Blocks(
                 <p style="font-size: 14px; color: #94a3b8; margin: 0 0 24px 0; line-height: 1.5;">
                     Clinical Research & Biostatistical Co-Pilot
                 </p>
-                <a href="./shiny/" target="_self" style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 600; padding: 12px 28px; border-radius: 8px; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);">
+                <a href="./shiny/" target="_self" onclick="window.location.href='./shiny/'; return false;" style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 600; padding: 12px 28px; border-radius: 8px; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4); cursor: pointer;">
                     🚀 Open Application
                 </a>
                 <p style="font-size: 12px; color: #64748b; margin: 16px 0 0 0;">
@@ -104,18 +113,11 @@ with gr.Blocks(
                 </p>
             </div>
         </div>
-        <script>
-            (function() {
-                try {
-                    var p = window.location.pathname.replace(/\\/+$/, '');
-                    window.location.replace(p + '/shiny/');
-                } catch(e) {
-                    window.location.href = './shiny/';
-                }
-            })();
-        </script>
         """
     )
+
+    # Execute client-side navigation as soon as Gradio mounts
+    demo.load(None, js=REDIRECT_JS)
 
 # Disable Node.js SSR proxy so Python FastAPI handles port 7860 directly
 os.environ["GRADIO_SSR_MODE"] = "False"
@@ -133,5 +135,6 @@ if __name__ == "__main__":
         ssr_mode=False,
         theme=gr.themes.Base(),
         css=custom_css,
+        js=REDIRECT_JS,
         allowed_paths=["/shiny", str(STATIC_DIR)],
     )
