@@ -15,8 +15,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import scipy.stats as stats
 
 from agent.tools.tool_pubmed import PubMedEvidenceTool
 from agent.tools.tool_sample_size import SampleSizeTool
@@ -25,7 +27,7 @@ from agent.topic_ideator import ClinicalTopicIdeator
 from core.common import select_variable_by_keyword
 from core.state import AppState
 from logger import get_logger
-from utils import linear_lib, logic, survival_lib
+from utils import linear_lib, logic, psm_lib, survival_lib
 from utils.data_cleaning import load_data_robust
 from utils.data_quality import check_data_quality
 from utils.proposal_parser import ProposalMetadata, ProposalParser
@@ -33,6 +35,40 @@ from utils.table_one_advanced import TableOneGenerator
 from utils.visualizations import plot_missing_pattern
 
 logger = get_logger(__name__)
+
+
+def _coerce_to_binary_series(series: pd.Series) -> pd.Series:
+    """Coerces boolean, numeric, or string clinical labels to binary 0/1 integers."""
+    if pd.api.types.is_bool_dtype(series):
+        return series.astype(int)
+    if pd.api.types.is_numeric_dtype(series):
+        unique_vals = set(series.dropna().unique())
+        if unique_vals.issubset({0, 1}):
+            return series.astype(int)
+        return (series > 0).astype(int)
+    # String / categorical mapping
+    s_str = series.astype(str).str.strip().str.lower()
+    pos_tokens = {
+        "1",
+        "true",
+        "yes",
+        "positive",
+        "pos",
+        "case",
+        "present",
+        "abnormal",
+        "intervention",
+        "diseased",
+        "reactive",
+    }
+    return s_str.apply(
+        lambda v: 1
+        if (
+            v in pos_tokens
+            or any(tok in v for tok in ["pos", "true", "abnormal", "yes"])
+        )
+        else 0
+    )
 
 
 @dataclass
@@ -213,21 +249,93 @@ class StatHarness:
 
     @staticmethod
     def run_diagnostic(
-        df: pd.DataFrame,
-        tp: int = 85,
-        fp: int = 15,
-        fn: int = 15,
-        tn: int = 185,
-        pre_test_prob: float = 25.0,
+        df: pd.DataFrame | None = None,
+        index_test_col: str | None = None,
+        ref_standard_col: str | None = None,
+        pre_test_prob: float | None = None,
+        tp: int | None = None,
+        fp: int | None = None,
+        fn: int | None = None,
+        tn: int | None = None,
     ) -> tuple[pd.DataFrame, dict[str, Any], go.Figure]:
         """Calculates Diagnostic Test Accuracy (STARD 2015) & Bayesian Fagan Nomogram."""
-        sens = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        spec = tn / (tn + fp) if (tn + fp) > 0 else 0.0
-        ppv = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        npv = tn / (tn + fn) if (tn + fn) > 0 else 0.0
+        calc_tp, calc_fp, calc_fn, calc_tn = None, None, None, None
+
+        if df is not None and not df.empty:
+            cols = df.columns.tolist()
+            idx_col = (
+                index_test_col
+                or select_variable_by_keyword(
+                    cols,
+                    [
+                        "pocus",
+                        "index",
+                        "test",
+                        "biomarker",
+                        "screen",
+                        "predict",
+                        "treatment",
+                        "arm",
+                    ],
+                )
+                or (cols[0] if len(cols) > 0 else None)
+            )
+
+            ref_col = (
+                ref_standard_col
+                or select_variable_by_keyword(
+                    [c for c in cols if c != idx_col],
+                    [
+                        "gold",
+                        "reference",
+                        "ref",
+                        "disease",
+                        "diagnosis",
+                        "status",
+                        "event",
+                        "death",
+                        "outcome",
+                        "target",
+                    ],
+                )
+                or (cols[1] if len(cols) > 1 else None)
+            )
+
+            if idx_col in df.columns and ref_col in df.columns:
+                sub = df[[idx_col, ref_col]].dropna()
+                if not sub.empty:
+                    y_test = _coerce_to_binary_series(sub[idx_col])
+                    y_ref = _coerce_to_binary_series(sub[ref_col])
+                    calc_tp = int(((y_test == 1) & (y_ref == 1)).sum())
+                    calc_fp = int(((y_test == 1) & (y_ref == 0)).sum())
+                    calc_fn = int(((y_test == 0) & (y_ref == 1)).sum())
+                    calc_tn = int(((y_test == 0) & (y_ref == 0)).sum())
+                    index_test_col = idx_col
+                    ref_standard_col = ref_col
+
+        final_tp = tp if tp is not None else (calc_tp if calc_tp is not None else 85)
+        final_fp = fp if fp is not None else (calc_fp if calc_fp is not None else 15)
+        final_fn = fn if fn is not None else (calc_fn if calc_fn is not None else 15)
+        final_tn = tn if tn is not None else (calc_tn if calc_tn is not None else 185)
+
+        total = final_tp + final_fp + final_fn + final_tn
+        if pre_test_prob is None:
+            if (final_tp + final_fn) > 0 and total > 0:
+                pre_test_prob = ((final_tp + final_fn) / total) * 100.0
+            else:
+                pre_test_prob = 25.0
+
+        sens = final_tp / (final_tp + final_fn) if (final_tp + final_fn) > 0 else 0.0
+        spec = final_tn / (final_tn + final_fp) if (final_tn + final_fp) > 0 else 0.0
+        ppv = final_tp / (final_tp + final_fp) if (final_tp + final_fp) > 0 else 0.0
+        npv = final_tn / (final_tn + final_fn) if (final_tn + final_fn) > 0 else 0.0
         lr_pos = (sens / (1.0 - spec)) if (1.0 - spec) > 0 else 1.0
         lr_neg = ((1.0 - sens) / spec) if spec > 0 else 1.0
-        dor = ((tp * tn) / (fp * fn)) if (fp * fn) > 0 else 1.0
+        dor = (
+            ((final_tp * final_tn) / (final_fp * final_fn))
+            if (final_fp * final_fn) > 0
+            else 1.0
+        )
 
         p_pre = pre_test_prob / 100.0
         odds_pre = p_pre / (1.0 - p_pre) if p_pre < 1.0 else 999.0
@@ -296,6 +404,11 @@ class StatHarness:
         )
 
         metrics = {
+            "tp": final_tp,
+            "fp": final_fp,
+            "fn": final_fn,
+            "tn": final_tn,
+            "pre_test_prob": pre_test_prob,
             "sensitivity": sens,
             "specificity": spec,
             "ppv": ppv,
@@ -305,8 +418,301 @@ class StatHarness:
             "dor": dor,
             "post_prob_pos": p_post_pos,
             "post_prob_neg": p_post_neg,
+            "index_test_col": index_test_col,
+            "ref_standard_col": ref_standard_col,
         }
         return metrics_df, metrics, fig
+
+    @staticmethod
+    def run_binary_rct(
+        df: pd.DataFrame,
+        treatment_col: str,
+        outcome_col: str,
+    ) -> tuple[pd.DataFrame, dict[str, Any], go.Figure]:
+        """
+        Evaluates a 2-arm Randomized Controlled Trial (CONSORT compliant) for binary primary outcomes.
+        Calculates Chi-Square / Fisher's exact tests, Relative Risk (RR), Risk Difference (RD),
+        Relative Risk Reduction (RRR), and Number Needed to Treat (NNT) with 95% Confidence Intervals.
+        """
+        clean_df = df[[treatment_col, outcome_col]].dropna()
+        t_bin = _coerce_to_binary_series(clean_df[treatment_col])
+        y_bin = _coerce_to_binary_series(clean_df[outcome_col])
+
+        # Control (0) vs Intervention (1)
+        n_ctrl = int((t_bin == 0).sum())
+        events_ctrl = int(((t_bin == 0) & (y_bin == 1)).sum())
+        p_ctrl = events_ctrl / n_ctrl if n_ctrl > 0 else 0.0
+
+        n_treat = int((t_bin == 1).sum())
+        events_treat = int(((t_bin == 1) & (y_bin == 1)).sum())
+        p_treat = events_treat / n_treat if n_treat > 0 else 0.0
+
+        # Risk Difference (RD = p_treat - p_ctrl)
+        rd = p_treat - p_ctrl
+        se_rd = (
+            np.sqrt(
+                (p_treat * (1 - p_treat) / n_treat) + (p_ctrl * (1 - p_ctrl) / n_ctrl)
+            )
+            if (n_treat > 0 and n_ctrl > 0)
+            else 0.0
+        )
+        rd_ci_low = rd - 1.96 * se_rd
+        rd_ci_high = rd + 1.96 * se_rd
+
+        # Relative Risk (RR = p_treat / p_ctrl)
+        if p_ctrl > 0 and p_treat > 0 and events_treat > 0 and events_ctrl > 0:
+            rr = p_treat / p_ctrl
+            se_ln_rr = np.sqrt(
+                ((n_treat - events_treat) / (n_treat * events_treat))
+                + ((n_ctrl - events_ctrl) / (n_ctrl * events_ctrl))
+            )
+            rr_ci_low = float(np.exp(np.log(rr) - 1.96 * se_ln_rr))
+            rr_ci_high = float(np.exp(np.log(rr) + 1.96 * se_ln_rr))
+        else:
+            rr = (p_treat / p_ctrl) if p_ctrl > 0 else 1.0
+            rr_ci_low, rr_ci_high = rr, rr
+
+        # Relative Risk Reduction (RRR)
+        rrr = (1.0 - rr) * 100.0 if rr > 0 else 0.0
+
+        # Number Needed to Treat (NNT = 1 / |RD|)
+        nnt = (1.0 / abs(rd)) if abs(rd) > 1e-6 else float("inf")
+
+        # 2x2 Contingency Table for Chi-square and Fisher's exact
+        table_2x2 = np.array(
+            [
+                [events_treat, max(0, n_treat - events_treat)],
+                [events_ctrl, max(0, n_ctrl - events_ctrl)],
+            ]
+        )
+        try:
+            chi2_res = stats.chi2_contingency(table_2x2, correction=True)
+            chi2_stat = float(chi2_res.statistic)
+            chi2_p = float(chi2_res.pvalue)
+        except Exception:
+            chi2_stat, chi2_p = 0.0, 1.0
+
+        try:
+            fisher_res = stats.fisher_exact(table_2x2)
+            fisher_or = float(fisher_res.statistic)
+            fisher_p = float(fisher_res.pvalue)
+        except Exception:
+            fisher_or, fisher_p = 1.0, 1.0
+
+        summary_df = pd.DataFrame(
+            [
+                {
+                    "Metric": "Control Event Rate",
+                    "Value": f"{events_ctrl}/{n_ctrl} ({p_ctrl:.1%})",
+                },
+                {
+                    "Metric": "Intervention Event Rate",
+                    "Value": f"{events_treat}/{n_treat} ({p_treat:.1%})",
+                },
+                {
+                    "Metric": "Absolute Risk Difference (RD)",
+                    "Value": f"{rd:+.1%} (95% CI {rd_ci_low:+.1%} to {rd_ci_high:+.1%})",
+                },
+                {
+                    "Metric": "Relative Risk (RR)",
+                    "Value": f"{rr:.3f} (95% CI {rr_ci_low:.3f} to {rr_ci_high:.3f})",
+                },
+                {
+                    "Metric": "Relative Risk Reduction (RRR)",
+                    "Value": f"{rrr:.1f}%",
+                },
+                {
+                    "Metric": "Number Needed to Treat (NNT)",
+                    "Value": f"{nnt:.1f}" if nnt < 1000 else ">1000",
+                },
+                {
+                    "Metric": "Chi-Square Test (with Yates)",
+                    "Value": f"χ² = {chi2_stat:.3f}, P = {chi2_p:.4f}",
+                },
+                {
+                    "Metric": "Fisher's Exact Test",
+                    "Value": f"Odds Ratio = {fisher_or:.3f}, P = {fisher_p:.4f}",
+                },
+            ]
+        )
+
+        metrics = {
+            "n_control": n_ctrl,
+            "events_control": events_ctrl,
+            "p_control": p_ctrl,
+            "n_intervention": n_treat,
+            "events_intervention": events_treat,
+            "p_intervention": p_treat,
+            "risk_diff": rd,
+            "risk_diff_ci": (rd_ci_low, rd_ci_high),
+            "relative_risk": rr,
+            "relative_risk_ci": (rr_ci_low, rr_ci_high),
+            "relative_risk_reduction": rrr,
+            "nnt": nnt,
+            "chi2_stat": chi2_stat,
+            "chi2_p": chi2_p,
+            "fisher_or": fisher_or,
+            "fisher_p": fisher_p,
+        }
+
+        fig = go.Figure()
+        groups = ["Control Arm", "Intervention Arm"]
+        rates = [p_ctrl * 100.0, p_treat * 100.0]
+        ci_lower = [
+            max(
+                0.0,
+                (p_ctrl - 1.96 * np.sqrt(p_ctrl * (1 - p_ctrl) / max(1, n_ctrl)))
+                * 100.0,
+            ),
+            max(
+                0.0,
+                (p_treat - 1.96 * np.sqrt(p_treat * (1 - p_treat) / max(1, n_treat)))
+                * 100.0,
+            ),
+        ]
+        ci_upper = [
+            min(
+                100.0,
+                (p_ctrl + 1.96 * np.sqrt(p_ctrl * (1 - p_ctrl) / max(1, n_ctrl)))
+                * 100.0,
+            ),
+            min(
+                100.0,
+                (p_treat + 1.96 * np.sqrt(p_treat * (1 - p_treat) / max(1, n_treat)))
+                * 100.0,
+            ),
+        ]
+        fig.add_trace(
+            go.Bar(
+                x=groups,
+                y=rates,
+                text=[
+                    f"{r:.1f}%<br>({e}/{n})"
+                    for r, e, n in zip(
+                        rates, [events_ctrl, events_treat], [n_ctrl, n_treat]
+                    )
+                ],
+                textposition="auto",
+                marker=dict(color=["#94a3b8", "#0284c7"]),
+                error_y=dict(
+                    type="data",
+                    symmetric=False,
+                    array=[u - r for u, r in zip(ci_upper, rates)],
+                    arrayminus=[r - low_val for r, low_val in zip(rates, ci_lower)],
+                ),
+            )
+        )
+        fig.update_layout(
+            title=f"RCT Primary Outcome Comparison ({outcome_col})",
+            yaxis_title="Event Rate (%)",
+            yaxis=dict(range=[0, min(100, max(ci_upper) * 1.25 + 5)]),
+            height=350,
+            margin=dict(l=20, r=20, t=40, b=20),
+        )
+
+        return summary_df, metrics, fig
+
+    @staticmethod
+    def run_psm(
+        df: pd.DataFrame,
+        treatment_col: str,
+        covariate_cols: list[str],
+        outcome_col: str | None = None,
+        caliper: float = 0.20,
+        ratio: int = 1,
+    ) -> tuple[pd.DataFrame, dict[str, Any], go.Figure, pd.DataFrame]:
+        """
+        Executes 1:1 Nearest-Neighbor Propensity Score Matching (PSM),
+        evaluates Standardized Mean Differences (SMD) before and after matching (Love plot),
+        and analyzes the matched cohort.
+        """
+        ps_series, _missing_info = psm_lib.calculate_ps(
+            df, treatment=treatment_col, covariates=covariate_cols
+        )
+        df_with_ps = df.copy()
+        df_with_ps["_ps"] = ps_series
+
+        df_matched = psm_lib.perform_matching(
+            data=df_with_ps,
+            treatment_col=treatment_col,
+            ps_col="_ps",
+            caliper=float(caliper),
+            ratio=int(ratio),
+        )
+
+        smd_pre = psm_lib.check_balance(
+            df, treatment=treatment_col, covariates=covariate_cols
+        )
+        smd_post = psm_lib.check_balance(
+            df_matched if not df_matched.empty else df,
+            treatment=treatment_col,
+            covariates=covariate_cols,
+        )
+        fig_love = psm_lib.plot_love_plot(smd_pre, smd_post)
+
+        balance_rows = []
+        if (
+            isinstance(smd_pre, pd.DataFrame)
+            and not smd_pre.empty
+            and isinstance(smd_post, pd.DataFrame)
+            and not smd_post.empty
+        ):
+            merged = pd.merge(
+                smd_pre[["Covariate", "SMD"]].rename(columns={"SMD": "SMD_pre"}),
+                smd_post[["Covariate", "SMD"]].rename(columns={"SMD": "SMD_post"}),
+                on="Covariate",
+                how="outer",
+            )
+            for _, r in merged.iterrows():
+                cov = str(r["Covariate"])
+                pre_val = float(r["SMD_pre"]) if pd.notnull(r["SMD_pre"]) else 0.0
+                post_val = float(r["SMD_post"]) if pd.notnull(r["SMD_post"]) else 0.0
+                balanced = (
+                    "✅ Balanced (<0.10)"
+                    if abs(post_val) < 0.10
+                    else "⚠️ Imbalanced (≥0.10)"
+                )
+                balance_rows.append(
+                    {
+                        "Covariate": cov,
+                        "SMD Before": f"{pre_val:.3f}",
+                        "SMD After": f"{post_val:.3f}",
+                        "Status": balanced,
+                    }
+                )
+        balance_df = pd.DataFrame(balance_rows)
+
+        matched_outcome_stats: dict[str, Any] = {}
+        matched_coef_df = None
+        if not df_matched.empty and outcome_col and outcome_col in df_matched.columns:
+            clean_matched = df_matched[
+                [outcome_col, treatment_col] + covariate_cols
+            ].dropna()
+            if not clean_matched.empty:
+                try:
+                    matched_coef_df, matched_metrics, _ = StatHarness.run_logistic(
+                        clean_matched,
+                        outcome_col=outcome_col,
+                        predictor_cols=[treatment_col] + covariate_cols,
+                    )
+                    matched_outcome_stats = matched_metrics
+                except Exception as e:
+                    logger.warning(f"Matched cohort regression error: {e}")
+
+        stats_dict = {
+            "n_original": len(df),
+            "n_matched": len(df_matched),
+            "n_treated_matched": int(df_matched[treatment_col].sum())
+            if not df_matched.empty and treatment_col in df_matched.columns
+            else 0,
+            "caliper": caliper,
+            "ratio": ratio,
+            "balance_df": balance_df,
+            "matched_outcome_stats": matched_outcome_stats,
+            "matched_coef_df": matched_coef_df,
+        }
+
+        return balance_df, stats_dict, fig_love, df_matched
 
     @staticmethod
     def run_linear(
@@ -432,7 +838,35 @@ class ClinicalAnalystEngine:
             ][:4]
 
             fig = go.Figure()
-            if opt_id in [2, 1] and time_col and event_col:
+            if opt_id == 1:
+                t_col = treat_col or cols[0]
+                o_col = event_col or (cols[1] if len(cols) > 1 else cols[0])
+                summary_df, metrics, fig = StatHarness.run_binary_rct(
+                    df_gen,
+                    treatment_col=t_col,
+                    outcome_col=o_col,
+                )
+                response_md = f"""### 🚀 ดำเนินการวิเคราะห์แนวทางที่ {opt_id} (Randomized Controlled Trial - CONSORT 2010)
+
+**สร้างชุดข้อมูลจำลองตามแนวทางที่ {opt_id}:** `{state.file_name}` (n = {len(df_gen):,} ราย)
+- **Treatment Arm:** `{t_col}` (Control: `{metrics["n_control"]}` ราย vs Intervention: `{metrics["n_intervention"]}` ราย)
+- **Primary Endpoint:** `{o_col}` (Binary Event)
+
+#### 1. ผลการเปรียบเทียบผลลัพธ์หลัก (Primary Outcome Comparison & Effect Sizes):
+- **Control Event Rate:** `{metrics["events_control"]}/{metrics["n_control"]}` (**`{metrics["p_control"]:.1%}`**)
+- **Intervention Event Rate:** `{metrics["events_intervention"]}/{metrics["n_intervention"]}` (**`{metrics["p_intervention"]:.1%}`**)
+- **Relative Risk (RR):** **`{metrics["relative_risk"]:.3f}`** (95% CI `{metrics["relative_risk_ci"][0]:.3f}` to `{metrics["relative_risk_ci"][1]:.3f}`)
+- **Absolute Risk Difference (RD):** **`{metrics["risk_diff"]:+.1%}`** (95% CI `{metrics["risk_diff_ci"][0]:+.1%}` to `{metrics["risk_diff_ci"][1]:+.1%}`)
+- **Number Needed to Treat (NNT):** **`{metrics["nnt"]:.1f}`** ราย | **Relative Risk Reduction (RRR):** `{metrics["relative_risk_reduction"]:.1f}%`
+
+#### 2. การทดสอบสมมติฐานทางสถิติ (Hypothesis Testing):
+- **Chi-Square Test (with Yates correction):** $\\chi^2$ = `{metrics["chi2_stat"]:.3f}` (P-value = **`{metrics["chi2_p"]:.4f}`**)
+- **Fisher's Exact Test:** P-value = **`{metrics["fisher_p"]:.4f}`** (Odds Ratio = `{metrics["fisher_or"]:.3f}`)
+
+{summary_df.to_markdown(index=False)}
+"""
+                return response_md, state, fig, df_gen
+            elif opt_id == 2 and time_col and event_col:
                 fig, km_df, stats_dict = StatHarness.run_survival(
                     df_gen,
                     time_col=time_col,
@@ -441,25 +875,68 @@ class ClinicalAnalystEngine:
                     covar_cols=covars,
                 )
                 km_p_val = stats_dict.get("km_stats", {}).get("p_value", "N/A")
-                response_md = f"""### 🚀 ดำเนินการวิเคราะห์แนวทางที่ {opt_id} ทันที (Immediate Statistical Execution)
+                km_p_val_str = (
+                    f"{km_p_val:.4f}"
+                    if isinstance(km_p_val, (int, float))
+                    else str(km_p_val)
+                )
+                response_md = f"""### 🚀 ดำเนินการวิเคราะห์แนวทางที่ {opt_id} (Kaplan-Meier & Cox Proportional Hazards - STROBE)
 
 **สร้างชุดข้อมูลจำลองตามแนวทางที่ {opt_id}:** `{state.file_name}` (n = {len(df_gen):,} ราย)
 
 #### 1. Kaplan-Meier Survival Analysis & Log-Rank Test:
 - **Duration / Time:** `{time_col}` | **Event / Status:** `{event_col}`
-- **Log-Rank P-value:** `{km_p_val}`
-- **เหตุการณ์ที่เกิดขึ้นทั้งหมด (Events):** `{df_gen[event_col].sum()}` จาก `{len(df_gen)}` ราย
+- **Log-Rank P-value:** `{km_p_val_str}`
+- **เหตุการณ์ที่เกิดขึ้นทั้งหมด (Events):** `{df_gen[event_col].sum() if event_col in df_gen.columns else "N/A"}` จาก `{len(df_gen)}` ราย
 
 #### 2. Multivariable Cox Proportional Hazards Model:
-- **Confounders Adjusted:** {", ".join([f"`{c}`" for c in covars])}
+- **Confounders Adjusted:** {", ".join([f"`{c}`" for c in covars]) if covars else "None"}
 - **สถานะ:** ข้อมูลถูกบันทึกเข้า session และเรนเดอร์กราฟในหน้าต่าง Visual Output เรียบร้อยแล้วครับ
 """
                 return response_md, state, fig, df_gen
             elif opt_id == 3:
-                metrics_df, metrics, fig = StatHarness.run_diagnostic(df_gen)
+                idx_col = (
+                    select_variable_by_keyword(
+                        cols,
+                        [
+                            "pocus",
+                            "index_test",
+                            "test",
+                            "biomarker",
+                            "screening",
+                            "treatment",
+                            "arm",
+                            "group",
+                        ],
+                    )
+                    or cols[0]
+                )
+                ref_col = select_variable_by_keyword(
+                    [c for c in cols if c != idx_col],
+                    [
+                        "gold_standard",
+                        "reference",
+                        "ref",
+                        "disease",
+                        "diagnosis",
+                        "status",
+                        "mortality",
+                        "death",
+                        "event",
+                        "outcome",
+                    ],
+                ) or (cols[1] if len(cols) > 1 else cols[0])
+
+                metrics_df, metrics, fig = StatHarness.run_diagnostic(
+                    df_gen,
+                    index_test_col=idx_col,
+                    ref_standard_col=ref_col,
+                )
                 response_md = f"""### 🚀 ดำเนินการวิเคราะห์แนวทางที่ {opt_id} (Diagnostic Accuracy & Fagan Nomogram - STARD 2015)
 
 **สร้างชุดข้อมูลจำลองตามแนวทางที่ {opt_id}:** `{state.file_name}` (n = {len(df_gen):,} ราย)
+- **Index Diagnostic Test:** `{idx_col}` | **Reference Standard:** `{ref_col}`
+- **2x2 Matrix Counts:** TP = `{metrics["tp"]}`, FP = `{metrics["fp"]}`, FN = `{metrics["fn"]}`, TN = `{metrics["tn"]}`
 
 #### 1. ผลการประเมินความแม่นยำในการวินิจฉัย (Diagnostic Performance Metrics):
 - **Sensitivity (ความไว):** `{metrics["sensitivity"]:.1%}` | **Specificity (ความจำเพาะ):** `{metrics["specificity"]:.1%}`
@@ -467,26 +944,74 @@ class ClinicalAnalystEngine:
 - **Diagnostic Odds Ratio (DOR):** `{metrics["dor"]:.2f}`
 
 #### 2. Bayesian Pre-test to Post-test Updating (Fagan Nomogram):
-- **Pre-Test Probability:** `25.0%`
+- **Pre-Test Probability:** `{metrics["pre_test_prob"]:.1f}%`
 - **Post-Test Probability (Positive Test):** `{metrics["post_prob_pos"]:.1f}%`
 - **Post-Test Probability (Negative Test):** `{metrics["post_prob_neg"]:.1f}%`
 
 {metrics_df.to_markdown(index=False)}
 """
                 return response_md, state, fig, df_gen
-            elif opt_id in [4, 5]:
+            elif opt_id == 4:
+                o_col = event_col or (cols[1] if len(cols) > 1 else cols[0])
+                p_cols = covars or [c for c in cols if c != o_col][:4]
                 coef_df, metrics, fig = StatHarness.run_logistic(
                     df_gen,
-                    outcome_col=event_col or cols[1],
-                    predictor_cols=covars or cols[:4],
+                    outcome_col=o_col,
+                    predictor_cols=p_cols,
                 )
-                response_md = f"""### 🚀 ดำเนินการวิเคราะห์แนวทางที่ {opt_id} (Multivariable Model & Table 1)
+                response_md = f"""### 🚀 ดำเนินการวิเคราะห์แนวทางที่ {opt_id} (Clinical Prediction Model - TRIPOD+AI)
 
 **ชุดข้อมูล:** `{state.file_name}` (n = {len(df_gen):,} ราย)  
-**ตัวแปรตาม:** `{event_col or cols[1]}` (Binary Event)  
+**ตัวแปรตาม (Primary Outcome):** `{o_col}` (Binary Event)  
 **McFadden Pseudo-$R^2$:** `{metrics.get("mcfadden", 0.0):.4f}` | **AIC:** `{metrics.get("aic", 0.0):.1f}`
 
+#### Odds Ratios & Multivariable Model Summary:
 {coef_df.to_markdown(index=False)}
+"""
+                return response_md, state, fig, df_gen
+            elif opt_id == 5:
+                t_col = treat_col or cols[0]
+                o_col = event_col or (cols[1] if len(cols) > 1 else cols[0])
+                psm_covars = covars or [c for c in cols if c not in [t_col, o_col]][:4]
+
+                balance_df, stats_dict, fig, df_matched = StatHarness.run_psm(
+                    df_gen,
+                    treatment_col=t_col,
+                    covariate_cols=psm_covars,
+                    outcome_col=o_col,
+                    caliper=0.20,
+                    ratio=1,
+                )
+
+                state.df_matched = df_matched
+                state.is_matched = not df_matched.empty
+                state.matched_treatment_col = t_col
+                state.matched_covariates = psm_covars
+
+                matched_reg_md = ""
+                if (
+                    stats_dict.get("matched_coef_df") is not None
+                    and not stats_dict["matched_coef_df"].empty
+                ):
+                    matched_reg_md = f"""
+#### 3. ผลการวิเคราะห์ในกลุ่มประชากรที่จับคู่แล้ว (Matched Cohort Analysis):
+{stats_dict["matched_coef_df"].to_markdown(index=False)}
+"""
+
+                response_md = f"""### 🚀 ดำเนินการวิเคราะห์แนวทางที่ {opt_id} (Propensity Score Matching & Causal Inference)
+
+**สร้างชุดข้อมูลจำลองตามแนวทางที่ {opt_id}:** `{state.file_name}` (n = {len(df_gen):,} ราย)
+- **Treatment Exposure:** `{t_col}` | **Outcome:** `{o_col}`
+- **Covariates Adjusted in PS Model:** {", ".join([f"`{c}`" for c in psm_covars])}
+
+#### 1. ผลการจับคู่กลุ่มตัวอย่าง (1:1 Nearest-Neighbor Matching, Caliper 0.20 SD):
+- **Original Cohort:** `{stats_dict["n_original"]}` ราย
+- **Matched Balanced Cohort:** **`{stats_dict["n_matched"]}` ราย** ({stats_dict["n_treated_matched"]} คู่)
+- **สถานะ:** ชุดข้อมูลที่จับคู่แล้วถูกบันทึกเข้า session (`AppState.df_matched`) เรียบร้อยแล้ว
+
+#### 2. การประเมินความสมดุลของตัวแปรกวน (Covariate Balance - Love Plot & SMD):
+{balance_df.to_markdown(index=False) if not balance_df.empty else "No covariate balance table available."}
+{matched_reg_md}
 """
                 return response_md, state, fig, df_gen
             else:

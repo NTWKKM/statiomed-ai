@@ -64,6 +64,20 @@ def test_clinical_analyst_turn_dyspnea_ideation():
     assert "แนวทางที่ 2" in resp_md
 
 
+def test_clinical_analyst_turn_select_option_1():
+    state = AppState()
+    msg = "เลือกข้อ 1 รัน RCT primary outcome analysis"
+    resp_md, new_state, fig, _preview_df = ClinicalAnalystEngine.process_turn(
+        user_message=msg,
+        file_paths=None,
+        state=state,
+    )
+    assert new_state.has_data()
+    assert "Randomized Controlled Trial" in resp_md or "CONSORT" in resp_md
+    assert "Relative Risk" in resp_md or "Risk Difference" in resp_md
+    assert fig is not None
+
+
 def test_clinical_analyst_turn_select_option_2():
     state = AppState()
     msg = "เลือกข้อ 2 สร้าง synthetic data แล้วรัน survival ให้ดู"
@@ -89,4 +103,19 @@ def test_clinical_analyst_turn_select_option_3():
     assert new_state.has_data()
     assert "Option 3" in new_state.file_name or "Diagnostic" in resp_md
     assert "Sensitivity" in resp_md
+    assert "2x2 Matrix Counts" in resp_md
+    assert fig is not None
+
+
+def test_clinical_analyst_turn_select_option_5():
+    state = AppState()
+    msg = "เลือกข้อ 5 ทำ propensity score matching"
+    resp_md, new_state, fig, _preview_df = ClinicalAnalystEngine.process_turn(
+        user_message=msg,
+        file_paths=None,
+        state=state,
+    )
+    assert new_state.has_data()
+    assert "Propensity Score Matching" in resp_md
+    assert "Nearest-Neighbor" in resp_md
     assert fig is not None

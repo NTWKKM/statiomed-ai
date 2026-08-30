@@ -53,10 +53,78 @@ def test_stat_harness_table_one():
 
 def test_stat_harness_diagnostic():
     df, _ = generate_example_dataset()
-    metrics_df, metrics, fig = StatHarness.run_diagnostic(df)
+    metrics_df, metrics, fig = StatHarness.run_diagnostic(
+        df, index_test_col="treatment", ref_standard_col="death"
+    )
     assert not metrics_df.empty
     assert "sensitivity" in metrics
+    assert "tp" in metrics and "tn" in metrics
+    assert metrics["tp"] + metrics["fp"] + metrics["fn"] + metrics["tn"] == len(
+        df.dropna(subset=["treatment", "death"])
+    )
     assert fig is not None
+
+
+def test_stat_harness_diagnostic_explicit_counts():
+    import pandas as pd
+
+    # Construct DataFrame with exactly TP=80, FP=20, FN=10, TN=90
+    data = (
+        [{"pocus": 1, "gold_dx": 1}] * 80
+        + [{"pocus": 1, "gold_dx": 0}] * 20
+        + [{"pocus": 0, "gold_dx": 1}] * 10
+        + [{"pocus": 0, "gold_dx": 0}] * 90
+    )
+    df_test = pd.DataFrame(data)
+
+    metrics_df, metrics, fig = StatHarness.run_diagnostic(
+        df_test, index_test_col="pocus", ref_standard_col="gold_dx"
+    )
+    assert metrics["tp"] == 80
+    assert metrics["fp"] == 20
+    assert metrics["fn"] == 10
+    assert metrics["tn"] == 90
+    assert round(metrics["sensitivity"], 4) == round(80 / 90, 4)
+    assert round(metrics["specificity"], 4) == round(90 / 110, 4)
+    assert round(metrics["ppv"], 4) == round(80 / 100, 4)
+    assert round(metrics["npv"], 4) == round(90 / 100, 4)
+    assert round(metrics["pre_test_prob"], 2) == 45.0
+    assert fig is not None
+
+
+def test_stat_harness_binary_rct():
+    df, _ = generate_example_dataset()
+    summary_df, metrics, fig = StatHarness.run_binary_rct(
+        df=df,
+        treatment_col="treatment",
+        outcome_col="death",
+    )
+    assert not summary_df.empty
+    assert "relative_risk" in metrics
+    assert "risk_diff" in metrics
+    assert "chi2_p" in metrics
+    assert "n_control" in metrics and "n_intervention" in metrics
+    assert metrics["n_control"] + metrics["n_intervention"] == len(
+        df.dropna(subset=["treatment", "death"])
+    )
+    assert fig is not None
+
+
+def test_stat_harness_psm():
+    df, _ = generate_example_dataset()
+    balance_df, stats_dict, fig_love, df_matched = StatHarness.run_psm(
+        df=df,
+        treatment_col="treatment",
+        covariate_cols=["age", "bmi", "diabetes"],
+        outcome_col="death",
+        caliper=0.20,
+        ratio=1,
+    )
+    assert not df_matched.empty
+    assert stats_dict["n_matched"] > 0
+    assert stats_dict["n_original"] == len(df)
+    assert not balance_df.empty
+    assert fig_love is not None
 
 
 def test_clinical_analyst_turn_synthetic_generation():
