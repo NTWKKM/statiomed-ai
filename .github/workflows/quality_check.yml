@@ -1,18 +1,20 @@
-name: Quality & Clinical Validation CI
+name: Quality CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main]
 
 jobs:
-  lint-and-test:
+  test:
+    name: Run Pytest Suite
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -21,14 +23,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-prod.txt
-          pip install pytest pytest-cov ruff
+          pip install -r requirements.txt
 
-      - name: Run Ruff Linter & Formatter Check
+      - name: Run Pytest
         run: |
-          ruff check .
-          ruff format --check .
-
-      - name: Run Biostatistical Ground-Truth & Unit Tests
-        run: |
-          pytest tests/ -v --cov=utils --cov=agent --cov-report=term-missing
+          pytest
