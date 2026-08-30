@@ -45,6 +45,7 @@ class SampleSizeTool(Tool):
         "test_type": {
             "type": "string",
             "description": "Type of statistical test: 'two_proportions', 'survival_logrank', or 'two_means'.",
+            "nullable": True,
         },
         "p1": {
             "type": "number",
