@@ -81,4 +81,4 @@ shiny run app.py --port 7860 --reload
 
 Distributed under the **Apache-2.0 License**.  
 Designed for compliance with **Thailand PDPA** and **ICMJE / SAMPL / EQUATOR** medical publication guidelines.
->>>>>>> 4fdeca8 (feat: initialize StatioMed AI clinical research suite (Gradio SDK))
+
