@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -57,25 +58,45 @@ def select_variable_by_keyword(
 ) -> str | None:
     """
     Intelligently attempts to select a default variable from a list of columns
-    based on a list of keywords.
+    based on a prioritized list of keywords with token-boundary matching to prevent
+    false-positive substring collisions (e.g., 'n_statin' matching 'mean_statin').
 
-    Args:
-        columns: List of available column names.
-        keywords: List of keywords to search for (case-insensitive).
-        default_to_first: If True, returns the first column if no keyword match is found.
-
-    Returns:
-        The matched column name, or the first column (if default_to_first is True),
-        or None if no match/no columns.
+    Matching Tiers:
+    1. Exact Match (case-insensitive)
+    2. Token & Word-boundary Match (case-insensitive regex)
+    3. Prefix/Suffix Delimited Match (with '_' or '.')
     """
     if not columns:
         return None
 
-    # Try to find a match by keyword priority
+    # Tier 1: Exact match (case-insensitive)
     for k in keywords:
-        k_lower = k.lower()
+        k_lower = k.strip().lower()
         for col in columns:
-            if k_lower in col.lower():
+            if k_lower == col.strip().lower():
+                return col
+
+    # Tier 2: Token / Word-boundary Match (case-insensitive regex)
+    for k in keywords:
+        k_lower = k.strip().lower()
+        pattern = re.compile(
+            rf"(^|[^a-zA-Z0-9]){re.escape(k_lower)}([^a-zA-Z0-9]|$)", re.IGNORECASE
+        )
+        for col in columns:
+            if pattern.search(col):
+                return col
+
+    # Tier 3: Delimited prefix / suffix match
+    for k in keywords:
+        k_lower = k.strip().lower()
+        for col in columns:
+            col_lower = col.strip().lower()
+            if (
+                col_lower.startswith(f"{k_lower}_")
+                or col_lower.endswith(f"_{k_lower}")
+                or col_lower.startswith(f"{k_lower}.")
+                or col_lower.endswith(f".{k_lower}")
+            ):
                 return col
 
     # Default fallback

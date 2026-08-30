@@ -1,31 +1,20 @@
-from __future__ import annotations
-
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 from shiny import App, Inputs, Outputs, Session, reactive, ui
 
-from config import CONFIG
 from logger import LoggerFactory, get_logger
 
 # Import Tabs
 from tabs import (
     tab_ai_copilot,
-    tab_home,
-    tab_data,
     tab_baseline_matching,
     tab_core_regression,
-    tab_survival,
-    tab_diag,
-    tab_corr,
-    tab_agreement,
-    tab_meta_analysis,
-    tab_causal_inference,
+    tab_data,
     tab_sample_size,
     tab_settings,
+    tab_survival,
 )
-from tabs._common import wrap_with_container
 
 # Initialize Logger
 LoggerFactory.configure()
@@ -77,39 +66,19 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
 
 # Create Shiny App
 shiny_app = App(app_ui, server, static_assets=Path(__file__).parent / "static")
-
-# Create Gradio App with Shiny mounted as ASGI sub-app
-from starlette.staticfiles import StaticFiles
-import gradio as gr
-from gradio.routes import App as GradioApp
-
-gradio_app = GradioApp()
-STATIC_DIR = Path(__file__).parent / "static"
-if STATIC_DIR.exists():
-    gradio_app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
-gradio_app.mount("/shiny", shiny_app)
-
-with gr.Blocks(
-    title="StatioMed AI — Clinical Research & Biostatistical Co-Pilot"
-) as demo:
-    gr.HTML(
-        """
-        <style>
-            footer {display: none !important;}
-            .gradio-container {padding: 0 !important; max-width: 100% !important; margin: 0 !important; background: #ffffff !important;}
-            body, html {margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #ffffff !important;}
-            iframe {position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; border: none; margin: 0; padding: 0; z-index: 99999; background: #ffffff;}
-        </style>
-        <iframe
-            src="/shiny/"
-            allow="accelerometer; autoplay; camera; clipboard-read; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowfullscreen>
-        </iframe>
-        """
-    )
-
-app = demo.app = gradio_app
+app = shiny_app
 
 if __name__ == "__main__":
-    demo.launch(_app=gradio_app, ssr_mode=False)
+    import os
+
+    import uvicorn
+
+    from asgi import app as asgi_app
+
+    port = int(os.environ.get("PORT", os.environ.get("GRADIO_SERVER_PORT", 7860)))
+    uvicorn.run(
+        asgi_app,
+        host="0.0.0.0",
+        port=port,
+        loop="asyncio",
+    )

@@ -944,7 +944,16 @@ def meta_analysis_server(
         df = active_df()
         cols = list(df.columns) if df is not None else []
         sel = select_variable_by_keyword(
-            cols, ["mean_statin", "mean_t", "mean1", "m_t"]
+            cols,
+            [
+                "mean_statin",
+                "mean_treatment",
+                "mean_tx",
+                "mean_t",
+                "mean1",
+                "m_t",
+                "mean_exp",
+            ],
         )
         return ui.input_select(
             "cont_mean_t", "Mean (Treatment):", choices=cols, selected=sel
@@ -955,7 +964,18 @@ def meta_analysis_server(
     def ui_cont_sd_t():
         df = active_df()
         cols = list(df.columns) if df is not None else []
-        sel = select_variable_by_keyword(cols, ["sd_statin", "sd_t", "sd1", "s_t"])
+        sel = select_variable_by_keyword(
+            cols,
+            [
+                "sd_statin",
+                "sd_treatment",
+                "sd_tx",
+                "sd_t",
+                "sd1",
+                "s_t",
+                "sd_exp",
+            ],
+        )
         return ui.input_select(
             "cont_sd_t", "SD (Treatment):", choices=cols, selected=sel
         )
@@ -965,7 +985,20 @@ def meta_analysis_server(
     def ui_cont_n_t():
         df = active_df()
         cols = list(df.columns) if df is not None else []
-        sel = select_variable_by_keyword(cols, ["n_statin", "n_t", "n1"])
+        sel = select_variable_by_keyword(
+            cols,
+            [
+                "n_statin",
+                "n_treatment",
+                "n_tx",
+                "n_t",
+                "total_statin",
+                "total_treatment",
+                "total_t",
+                "n1",
+                "pop_t",
+            ],
+        )
         return ui.input_select("cont_n_t", "N (Treatment):", choices=cols, selected=sel)
 
     @output
@@ -974,7 +1007,14 @@ def meta_analysis_server(
         df = active_df()
         cols = list(df.columns) if df is not None else []
         sel = select_variable_by_keyword(
-            cols, ["mean_control", "mean_c", "mean0", "m_c"]
+            cols,
+            [
+                "mean_control",
+                "mean_ctrl",
+                "mean_c",
+                "mean0",
+                "m_c",
+            ],
         )
         return ui.input_select(
             "cont_mean_c", "Mean (Control):", choices=cols, selected=sel
@@ -985,7 +1025,16 @@ def meta_analysis_server(
     def ui_cont_sd_c():
         df = active_df()
         cols = list(df.columns) if df is not None else []
-        sel = select_variable_by_keyword(cols, ["sd_control", "sd_c", "sd0", "s_c"])
+        sel = select_variable_by_keyword(
+            cols,
+            [
+                "sd_control",
+                "sd_ctrl",
+                "sd_c",
+                "sd0",
+                "s_c",
+            ],
+        )
         return ui.input_select("cont_sd_c", "SD (Control):", choices=cols, selected=sel)
 
     @output
@@ -993,7 +1042,18 @@ def meta_analysis_server(
     def ui_cont_n_c():
         df = active_df()
         cols = list(df.columns) if df is not None else []
-        sel = select_variable_by_keyword(cols, ["n_control", "n_c", "n0"])
+        sel = select_variable_by_keyword(
+            cols,
+            [
+                "n_control",
+                "n_ctrl",
+                "n_c",
+                "total_control",
+                "total_c",
+                "n0",
+                "pop_c",
+            ],
+        )
         return ui.input_select("cont_n_c", "N (Control):", choices=cols, selected=sel)
 
     # Generic Column Pickers
