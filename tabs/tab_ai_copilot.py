@@ -114,16 +114,99 @@ def ai_copilot_server(
             )
             return
 
-        if mode == "pico_pubmed":
+        if mode == "synthetic_cohort":
+            df_gen, meta = SyntheticDataTool.generate_topic_aware_cohort(
+                prompt, n=200, seed=42
+            )
+            dataset.set(df_gen)
+
+            # Build Table Preview (First 5 Rows)
+            cols = list(df_gen.columns)
+            display_cols = cols[:8]  # First 8 columns for clean UI
+
+            tbl_head = "".join(f"<th>{html.escape(c)}</th>" for c in display_cols)
+            tbl_rows = ""
+            for _, r in df_gen.head(5).iterrows():
+                row_html = "".join(
+                    f"<td>{html.escape(str(r[c]))}</td>" for c in display_cols
+                )
+                tbl_rows += f"<tr>{row_html}</tr>"
+
+            models_html = "".join(
+                f"<li class='mb-1'><i class='bi bi-check-circle text-primary me-1'></i>{html.escape(m)}</li>"
+                for m in meta.get("recommended_models", [])
+            )
+
+            pico = meta.get("pico", {})
+            pico_html = f"""
+            <div class='row g-2 mb-3'>
+                <div class='col-md-6'><div class='p-2 bg-white border rounded small'><strong>👥 Population (P):</strong> {html.escape(pico.get("population", "Clinical Cohort"))}</div></div>
+                <div class='col-md-6'><div class='p-2 bg-white border rounded small'><strong>💊 Exposure/Intervention (I):</strong> {html.escape(pico.get("exposure", pico.get("intervention", "Target Exposure")))}</div></div>
+                <div class='col-md-6'><div class='p-2 bg-white border rounded small'><strong>⚖️ Comparator (C):</strong> {html.escape(pico.get("comparator", "Control Group"))}</div></div>
+                <div class='col-md-6'><div class='p-2 bg-white border rounded small'><strong>🎯 Outcome (O):</strong> {html.escape(pico.get("outcome", "Primary Endpoint"))}</div></div>
+            </div>
+            """
+
+            html_out = f"""
+            <div class='card border-success p-3'>
+                <div class='d-flex justify-content-between align-items-center mb-2'>
+                    <h6 class='text-success m-0'>🧬 Synthetic Clinical Cohort Generated & Active in Session!</h6>
+                    <span class='badge bg-success'>{html.escape(meta.get("domain", "Clinical Research"))}</span>
+                </div>
+                <p class='text-muted small mb-2'>{html.escape(meta.get("description", ""))}</p>
+                
+                {pico_html}
+
+                <div class='table-responsive border rounded bg-white mb-3'>
+                    <table class='table table-sm table-striped table-hover m-0' style='font-size: 0.85rem;'>
+                        <thead class='table-light'><tr>{tbl_head}</tr></thead>
+                        <tbody>{tbl_rows}</tbody>
+                    </table>
+                </div>
+                
+                <div class='p-3 bg-light border rounded mb-2'>
+                    <h6 class='text-dark mb-2'>📐 Recommended Biostatistical Analysis Workflow (SAMPL Compliant):</h6>
+                    <ul class='list-unstyled mb-0' style='font-size: 0.9rem;'>
+                        {models_html}
+                    </ul>
+                </div>
+
+                <div class='alert alert-info py-2 px-3 mb-0 small'>
+                    👉 <strong>Next Steps:</strong> ข้อมูลจำลองถูกโหลดเข้าสู่ระบบแล้ว สามารถคลิกไปที่แท็บ <strong>📊 Data Profiler</strong> เพื่อตรวจคุณภาพข้อมูล, <strong>📈 Regression</strong> เพื่อรันสถิติ, หรือ <strong>⏱️ Survival</strong> เพื่อวิเคราะห์การรอดชีพได้ทันที
+                </div>
+            </div>
+            """
+            result_state.set(html_out)
+
+        elif mode == "pico_pubmed":
             tool = PubMedEvidenceTool()
             try:
-                articles = tool.search_and_extract(prompt, max_results=3)
+                # Query PubMed with search terms
+                search_q = prompt
+                if any(
+                    w in prompt.lower()
+                    for w in ["สารเสพติด", "จิตเวช", "ยาบ้า", "substance", "psychiatry"]
+                ):
+                    search_q = "substance abuse psychiatric disorders methamphetamine psychosis"
+                elif any(
+                    w in prompt.lower()
+                    for w in ["มะเร็ง", "cancer", "nsclc", "pembrolizumab"]
+                ):
+                    search_q = (
+                        "pembrolizumab non-small cell lung cancer overall survival"
+                    )
+                elif any(
+                    w in prompt.lower() for w in ["sepsis", "icu", "shock", "ติดเชื้อ"]
+                ):
+                    search_q = "sepsis resuscitation bundle mortality ICU"
+
+                articles = tool.search_and_extract(search_q, max_results=3)
                 if not articles:
                     result_state.set(
                         "<div class='alert alert-info'>No published articles found for this query.</div>"
                     )
                     return
-                html_out = "<div class='card p-3'><h6>📚 Published Benchmark Evidence (Vancouver Format):</h6><ol>"
+                html_out = "<div class='card p-3 border-primary'><h6>📚 Published Benchmark Evidence (Vancouver Format):</h6><ol>"
                 for a in articles:
                     html_out += f"<li><strong>{html.escape(a['title'])}</strong><br><span class='text-muted small'>{html.escape(a['vancouver_citation'])}</span></li><br>"
                 html_out += "</ol></div>"
@@ -135,51 +218,31 @@ def ai_copilot_server(
 
         elif mode == "sample_size":
             res = SampleSizeTool.calculate_two_proportions(
-                p1=0.25, p2=0.15, power=0.80, alpha=0.05, dropout_rate=0.15
+                p1=0.35, p2=0.18, power=0.80, alpha=0.05, dropout_rate=0.15
             )
             html_out = f"""
             <div class='card p-3 border-info'>
-                <h6 class='text-info'>📐 Sample Size Calculation Result (Fleiss Formula with Continuity Correction):</h6>
-                <p><strong>Method:</strong> {res["test_type"]}</p>
+                <h6 class='text-info'>📐 Sample Size & Power Calculation (Fleiss Formula with Continuity Correction):</h6>
+                <p><strong>Topic / Clinical Objective:</strong> {html.escape(prompt or "Comparative Clinical Trial")}</p>
                 <ul>
-                    <li>Control Event Rate ($p_1$): {res["p1_control"]:.1%}</li>
-                    <li>Intervention Event Rate ($p_2$): {res["p2_intervention"]:.1%}</li>
-                    <li>Allocation Ratio: {res["allocation_ratio"]:.1f}:1</li>
-                    <li>Total Raw Target: <strong>{res["n_total_raw"]}</strong> patients</li>
-                    <li><strong>Total Target with 15% Drop-out: <span class='text-success'>{res["n_total_adjusted"]}</span> patients ({res["n_control_adjusted"]} Control, {res["n_intervention_adjusted"]} Intervention)</strong></li>
+                    <li>Exposure / Baseline Event Rate ($p_1$): {res["p1_control"]:.1%}</li>
+                    <li>Intervention / Comparative Rate ($p_2$): {res["p2_intervention"]:.1%}</li>
+                    <li>Statistical Power ($1-\\beta$): 80.0% | Type I Error ($\alpha$): 0.05 (Two-sided)</li>
+                    <li>Total Target with 15% Drop-out: <strong><span class='text-success'>{res["n_total_adjusted"]}</span> patients ({res["n_control_adjusted"]} Group 1, {res["n_intervention_adjusted"]} Group 2)</strong></li>
                 </ul>
                 <div class='alert alert-light border'><em>"{res["justification_text"]}"</em></div>
             </div>
             """
             result_state.set(html_out)
 
-        elif mode == "synthetic_cohort":
-            df_mock = SyntheticDataTool.generate_rct_cohort(n=200, seed=42)
-            dataset.set(df_mock)
-            html_out = f"""
-            <div class='alert alert-success'>
-                <h6>🧬 Synthetic RCT Cohort Generated & Loaded into Session!</h6>
-                <p>Generated <strong>{len(df_mock)}</strong> simulated patient records with verified physiological bounds (SBP >= DBP + 20 mmHg, MAP, CKD-EPI eGFR). Data is now active in all statistical tabs.</p>
-                <div class='table-responsive mt-2'>
-                    <table class='table table-sm table-striped'>
-                        <thead>
-                            <tr><th>Subject ID</th><th>Age</th><th>Sex</th><th>Arm</th><th>SBP/DBP</th><th>MAP</th><th>eGFR</th><th>Event</th></tr>
-                        </thead>
-                        <tbody>
-            """
-            for _, r in df_mock.head(5).iterrows():
-                html_out += f"<tr><td>{r['subject_id']}</td><td>{r['age_years']}</td><td>{r['sex']}</td><td>{r['treatment_arm']}</td><td>{r['sbp_mmhg']:.0f}/{r['dbp_mmhg']:.0f}</td><td>{r['map_mmhg']}</td><td>{r['egfr_ckd_epi_ml_min']}</td><td>{r['primary_outcome_event']}</td></tr>"
-            html_out += """
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            """
-            result_state.set(html_out)
-
         elif mode == "manuscript_draft":
+            _, meta = SyntheticDataTool.generate_topic_aware_cohort(
+                prompt, n=200, seed=42
+            )
+            pico = meta.get("pico", {})
+
             ctx = {
-                "study_title": prompt or "Comparative Clinical Study",
+                "study_title": prompt or "Clinical Research Investigation",
                 "n_total": 500,
                 "n_intervention": 250,
                 "n_control": 250,
@@ -195,16 +258,21 @@ def ai_copilot_server(
                 "hr_p_str": "= 0.005",
                 "c_index": "0.78",
             }
-            methods_txt = ManuscriptEngine.render_methods("rct", ctx)
-            results_txt = ManuscriptEngine.render_results("survival", ctx)
+            methods_txt = ManuscriptEngine.render_methods("cohort", ctx)
+            results_txt = ManuscriptEngine.render_results("regression", ctx)
 
             html_out = f"""
             <div class='card p-3 border-secondary'>
-                <h6>📄 Deterministic Manuscript Draft (CONSORT & SAMPL Compliant):</h6>
-                <div class='p-2 bg-light border rounded mb-3'>
+                <div class='d-flex justify-content-between align-items-center mb-2'>
+                    <h6>📄 Tailored Manuscript Draft (EQUATOR & SAMPL Compliant):</h6>
+                    <span class='badge bg-secondary'>{html.escape(meta.get("domain", "Clinical Study"))}</span>
+                </div>
+                <div class='p-3 bg-light border rounded mb-3'>
+                    <h6 class='text-primary mb-1'>Methods Section:</h6>
                     <pre style='white-space: pre-wrap; font-family: inherit;'>{html.escape(methods_txt)}</pre>
                 </div>
-                <div class='p-2 bg-light border rounded'>
+                <div class='p-3 bg-light border rounded'>
+                    <h6 class='text-success mb-1'>Results & Statistical Synthesis:</h6>
                     <pre style='white-space: pre-wrap; font-family: inherit;'>{html.escape(results_txt)}</pre>
                 </div>
             </div>
@@ -246,7 +314,7 @@ def ai_copilot_server(
             response = execute_agent_turn(agent, prompt)
             html_out = f"""
             <div class='card p-3 border-primary'>
-                <h6 class='text-primary'>🧠 smolagents Clinical Tech Lead Response:</h6>
+                <h6 class='text-primary'>🧠 smolagents Clinical Tech Lead Reasoning:</h6>
                 <div class='p-3 bg-light border rounded'>
                     <pre style='white-space: pre-wrap; font-family: inherit;'>{html.escape(response)}</pre>
                 </div>
@@ -255,9 +323,14 @@ def ai_copilot_server(
             result_state.set(html_out)
 
         else:  # sap_design
+            _, meta = SyntheticDataTool.generate_topic_aware_cohort(
+                prompt, n=200, seed=42
+            )
+            pico = meta.get("pico", {})
+
             sap_ctx = {
                 "study_title": prompt or "Clinical Investigation Protocol",
-                "primary_objective": prompt,
+                "primary_objective": f"To investigate the relationship between {pico.get('exposure', 'exposure')} and {pico.get('outcome', 'primary outcome')} in {pico.get('population', 'the target cohort')}.",
                 "n_total": 500,
                 "n_control": 250,
                 "n_intervention": 250,
@@ -268,7 +341,10 @@ def ai_copilot_server(
             sap_md = ManuscriptEngine.render_sap(sap_ctx)
             html_out = f"""
             <div class='card p-3 border-primary'>
-                <h6 class='text-primary'>📋 Statistical Analysis Plan (SAP) Proposal</h6>
+                <div class='d-flex justify-content-between align-items-center mb-2'>
+                    <h6 class='text-primary m-0'>📋 Statistical Analysis Plan (SAP) Proposal</h6>
+                    <span class='badge bg-primary'>{html.escape(meta.get("domain", "Clinical Research"))}</span>
+                </div>
                 <div class='p-3 bg-light border rounded'>
                     <pre style='white-space: pre-wrap; font-family: inherit;'>{html.escape(sap_md)}</pre>
                 </div>
