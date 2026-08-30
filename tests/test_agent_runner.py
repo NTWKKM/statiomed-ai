@@ -3,11 +3,12 @@ tests/test_agent_runner.py - Unit Tests for Two-Tier Model Router & Clinical Age
 """
 
 import os
+
 from agent.agent_runner import (
-    get_model,
+    CLINICAL_TECH_LEAD_SYSTEM_PROMPT,
     create_clinical_agent,
     execute_agent_turn,
-    CLINICAL_TECH_LEAD_SYSTEM_PROMPT,
+    get_model,
 )
 
 

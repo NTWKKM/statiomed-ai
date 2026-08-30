@@ -1,5 +1,17 @@
 from pathlib import Path
 
+# Hugging Face ZeroGPU Free Tier Bootstrap Hook
+# Hugging Face Free Tier runs Gradio Spaces on ZeroGPU and requires @spaces.GPU at module top-level.
+try:
+    import spaces
+
+    @spaces.GPU(duration=45)
+    def _zerogpu_startup_probe():
+        """Hugging Face ZeroGPU supervisor startup probe."""
+        pass
+except ImportError:
+    pass
+
 import pandas as pd
 from shiny import App, Inputs, Outputs, Session, reactive, ui
 

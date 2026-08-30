@@ -8,9 +8,8 @@ Orchestrates smolagents ToolCallingAgent with 2-Tier Model Strategy:
 """
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
-# Conditional import for spaces if running inside Hugging Face ZeroGPU Space
 try:
     import spaces
 

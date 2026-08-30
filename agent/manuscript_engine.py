@@ -7,9 +7,9 @@ Published Literature) and EQUATOR Network standards with ZERO numeric hallucinat
 =============================================================================
 """
 
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
-import re
 
 try:
     import jinja2

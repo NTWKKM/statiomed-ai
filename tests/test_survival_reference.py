@@ -7,10 +7,12 @@ Fixture: tests/fixtures/reference_datasets/lung_benchmark.csv (228 rows, 165 eve
 =============================================================================
 """
 
-import pytest
-import pandas as pd
-from lifelines import CoxPHFitter
 from pathlib import Path
+
+import pandas as pd
+import pytest
+from lifelines import CoxPHFitter
+
 
 def test_cox_ph_against_r_lung_benchmark():
     """

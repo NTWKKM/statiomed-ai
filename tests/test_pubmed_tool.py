@@ -2,7 +2,8 @@
 tests/test_pubmed_tool.py - Unit Tests for Rate-Limited PubMed Evidence Tool
 """
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from agent.tools.tool_pubmed import PubMedEvidenceTool
 
 

@@ -7,9 +7,10 @@ Adheres to smolagents v1.x Tool interface and includes RedCap data dictionary ex
 =============================================================================
 """
 
+from typing import Any, Dict, Optional
+
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, Optional
 
 try:
     from smolagents import Tool

@@ -4,8 +4,8 @@ tests/test_manuscript_templates.py - Unit Tests for Deterministic Jinja2 Manuscr
 
 from agent.manuscript_engine import (
     ManuscriptEngine,
-    format_sampl_p_value,
     format_sampl_ci,
+    format_sampl_p_value,
     format_sampl_pct,
 )
 

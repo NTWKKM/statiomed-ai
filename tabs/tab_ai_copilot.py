@@ -8,23 +8,21 @@ deterministic manuscript drafting, and EQUATOR Network checklist compliance.
 """
 
 from __future__ import annotations
+
 import html
-from typing import Any
+
 import pandas as pd
 from shiny import Inputs, Outputs, Session, module, reactive, render, ui
 
+from agent.agent_runner import create_clinical_agent, execute_agent_turn
+from agent.manuscript_engine import ManuscriptEngine
 from agent.tools.tool_pubmed import PubMedEvidenceTool
 from agent.tools.tool_sample_size import SampleSizeTool
 from agent.tools.tool_synthetic_data import SyntheticDataTool
-from agent.manuscript_engine import ManuscriptEngine
-from agent.agent_runner import create_clinical_agent, execute_agent_turn
 from utils.reporting_checklists import (
-    create_strobe_checklist,
     create_consort_checklist,
-    create_tripod_ai_checklist,
     create_stard_checklist,
-    create_prisma_checklist,
-    generate_checklist_markdown,
+    create_tripod_ai_checklist,
 )
 
 
@@ -221,10 +219,12 @@ def ai_copilot_server(
             html_out = f"""
             <div class='card p-3'>
                 <h6>📊 EQUATOR Network Reporting Checklists:</h6>
-                <ul class='nav nav-tabs' id='chkTabs'>
-                    <li class='nav-item'><span class='nav-link active'>CONSORT 2010 ({len(consort.items)} items)</span></li>
-                </ul>
-                <div class='p-3 border border-top-0'>
+                <div class='mb-2'>
+                    <span class='badge bg-primary me-1'>CONSORT 2010 ({len(consort.items)} items)</span>
+                    <span class='badge bg-secondary me-1'>TRIPOD+AI ({len(tripod.items)} items)</span>
+                    <span class='badge bg-info'>STARD 2015 ({len(stard.items)} items)</span>
+                </div>
+                <div class='p-3 border rounded'>
                     <p class='text-muted small'>Comprehensive publication audit matrices ready for STROBE, CONSORT, TRIPOD+AI (2024), and STARD (2015).</p>
                     <table class='table table-sm table-hover'>
                         <thead><tr><th>#</th><th>Item</th><th>Description</th></tr></thead>

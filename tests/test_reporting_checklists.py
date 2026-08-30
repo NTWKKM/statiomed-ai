@@ -3,17 +3,15 @@ tests/test_reporting_checklists.py - Unit Tests for EQUATOR Network Reporting Ch
 """
 
 from utils.reporting_checklists import (
+    auto_populate_consort,
+    auto_populate_stard,
+    auto_populate_tripod_ai,
     create_consort_checklist,
+    create_prisma_checklist,
+    create_stard_checklist,
     create_strobe_checklist,
     create_tripod_ai_checklist,
-    create_stard_checklist,
-    create_prisma_checklist,
-    auto_populate_strobe,
-    auto_populate_consort,
-    auto_populate_tripod_ai,
-    auto_populate_stard,
     generate_checklist_markdown,
-    ChecklistStatus,
 )
 
 

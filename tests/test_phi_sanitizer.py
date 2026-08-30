@@ -3,6 +3,7 @@ tests/test_phi_sanitizer.py - Unit & Security Tests for On-Prem De-identifier
 """
 
 import pandas as pd
+
 from tools_local.phi_sanitizer_cli import sanitize_dataframe
 
 

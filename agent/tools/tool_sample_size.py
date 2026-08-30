@@ -8,7 +8,7 @@ Adheres to SAMPL guidelines and smolagents v1.x Tool interface.
 """
 
 import math
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 try:
     from smolagents import Tool
@@ -28,8 +28,8 @@ except ImportError:
 
 
 from utils.sample_size_lib import (
-    calculate_sample_size_proportions,
     calculate_sample_size_means,
+    calculate_sample_size_proportions,
     calculate_sample_size_survival,
 )
 
