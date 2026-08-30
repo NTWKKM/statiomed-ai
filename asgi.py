@@ -17,8 +17,8 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import gradio as gr
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.gzip import GZipMiddleware
@@ -26,9 +26,6 @@ from starlette.routing import Mount
 from starlette.staticfiles import StaticFiles
 
 from app import shiny_app
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
 
 # Configure logging
 logging.basicConfig(
@@ -43,7 +40,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 
 @asynccontextmanager
-async def lifespan(app: Starlette) -> AsyncGenerator[None, None]:
+async def lifespan(app: Starlette):
     """Handle application startup and shutdown events."""
     # Startup
     logger.info("🚀 Starting Medical Stat Tool (ASGI Wrapper)...")
@@ -64,12 +61,36 @@ middleware = [
     Middleware(GZipMiddleware, minimum_size=500),  # Compress responses > 500 bytes
 ]
 
-# Create ASGI application
-app = Starlette(
+# Create ASGI base application
+base_app = Starlette(
     routes=routes,
     middleware=middleware,
     lifespan=lifespan,
 )
+
+# Hugging Face ZeroGPU Free Tier Bridge
+# ZeroGPU Free Tier requires a Gradio event listener decorated with @spaces.GPU
+# Mount Gradio app into Starlette ASGI application at /_gradio path
+try:
+    import spaces
+
+    @spaces.GPU(duration=45)
+    def _zerogpu_probe_fn(text: str = "") -> str:
+        return "StatioMed AI ZeroGPU Probe Active"
+
+except ImportError:
+
+    def _zerogpu_probe_fn(text: str = "") -> str:
+        return "StatioMed AI CPU Probe Active"
+
+
+with gr.Blocks(title="StatioMed AI ZeroGPU Bridge") as _gradio_probe:
+    _inp = gr.Textbox(visible=False)
+    _btn = gr.Button("Probe", visible=False)
+    _out = gr.Textbox(visible=False)
+    _btn.click(fn=_zerogpu_probe_fn, inputs=_inp, outputs=_out)
+
+app = gr.mount_gradio_app(base_app, _gradio_probe, path="/_gradio")
 
 # Development server
 if __name__ == "__main__":
