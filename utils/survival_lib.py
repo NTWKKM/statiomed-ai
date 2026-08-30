@@ -38,10 +38,9 @@ from lifelines.statistics import (
 )
 from lifelines.utils import median_survival_times
 from scipy import stats as scipy_stats
-from shiny import ui
 
+from core.common import get_color_palette
 from logger import get_logger
-from tabs._common import get_color_palette
 from utils.advanced_stats_lib import apply_mcc, calculate_vif
 from utils.data_cleaning import (
     apply_missing_values_to_df,
@@ -68,19 +67,13 @@ COLORS = get_color_palette()
 
 
 def progress_start(message: str = "Processing...", id: str = "progress_notif") -> None:
-    # Show a progress notification. Safely ignores if no session active.
-    try:
-        ui.notification_show(message, duration=None, id=id, type="message")
-    except RuntimeError:
-        pass  # No active session (e.g., running tests)
+    """Log start of analysis step."""
+    logger.debug("Progress start [%s]: %s", id, message)
 
 
 def progress_end(id: str = "progress_notif") -> None:
-    # Remove a progress notification. Safely ignores if no session active.
-    try:
-        ui.notification_remove(id)
-    except RuntimeError:
-        pass  # No active session (e.g., running tests)
+    """Log completion of analysis step."""
+    logger.debug("Progress end [%s]", id)
 
 
 # Try to import Firth Cox regression for small samples / rare events (firthmodels >= 0.7.2)
@@ -1107,7 +1100,10 @@ def fit_cox_ph(
 
         try:
             cph, res_df, method_used = _fit_firth_cox(
-                data, duration_col, event_col, covariate_cols,
+                data,
+                duration_col,
+                event_col,
+                covariate_cols,
                 penalty_weight=penalty_weight,
             )
         except Exception as e:
@@ -1150,7 +1146,10 @@ def fit_cox_ph(
             logger.info("Lifelines failed, attempting Firth Cox PH fallback...")
             try:
                 cph, res_df, method_used = _fit_firth_cox(
-                    data, duration_col, event_col, covariate_cols,
+                    data,
+                    duration_col,
+                    event_col,
+                    covariate_cols,
                     penalty_weight=penalty_weight,
                 )
             except Exception as e:

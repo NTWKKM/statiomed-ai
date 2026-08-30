@@ -1,4 +1,7 @@
-from shiny import ui
+try:
+    from shiny import ui
+except ImportError:
+    ui = None
 
 
 def create_input_group(title, *inputs, type="required"):

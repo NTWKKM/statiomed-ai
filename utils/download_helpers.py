@@ -152,7 +152,9 @@ def safe_report_generation(
         )
 
 
-def safe_data_download(data: Any, *, label: str = "Data", type_: str = "dataset") -> None:
+def safe_data_download(
+    data: Any, *, label: str = "Data", type_: str = "dataset"
+) -> None:
     """
     Validate data exists before allowing a download, aborting gracefully if empty.
 
@@ -171,7 +173,11 @@ def safe_data_download(data: Any, *, label: str = "Data", type_: str = "dataset"
         shiny.SilentException: If data is missing/empty (via req(False)).
     """
     import pandas as pd
-    from shiny import req
+
+    try:
+        from shiny import req
+    except ImportError:
+        req = None
 
     is_valid = False
     if data is not None:
@@ -189,6 +195,8 @@ def safe_data_download(data: Any, *, label: str = "Data", type_: str = "dataset"
             type="warning",
             duration=5,
         )
-        req(False)
+        if req is not None:
+            req(False)
+        return
 
     _notify(f"✅ {label} download initiated.", type="message", duration=3)
