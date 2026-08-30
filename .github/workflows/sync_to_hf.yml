@@ -1,0 +1,54 @@
+name: Sync to Hugging Face Spaces
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  sync-to-hub:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Install git-xet
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/huggingface/xet-core/refs/heads/main/git_xet/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Push to Hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ntwkkm
+          SPACE_NAME: statiomed-ai
+        run: |
+          # 1. Configure Git
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "GitHub Actions"
+
+          # 2. Install Git Xet
+          git xet install
+
+          # 3. Flatten history to bypass LFS/binary rejection from old commits
+          git checkout --orphan hf-deploy
+          git rm -rf --cached .
+          git add .
+          git commit -m "Deploy StatioMed AI to Hugging Face Hub"
+
+          # 4. Setup authentication using GIT_ASKPASS
+          cat > /tmp/git-askpass.sh <<'ASKPASS_EOF'
+          #!/bin/sh
+          case "$1" in
+            *Username*) echo "$HF_USERNAME" ;;
+            *Password*) echo "$HF_TOKEN" ;;
+          esac
+          ASKPASS_EOF
+          chmod 700 /tmp/git-askpass.sh
+
+          git remote add space https://huggingface.co/spaces/$HF_USERNAME/$SPACE_NAME
+
+          # 5. Force push squashed commit to HF Space main branch
+          GIT_ASKPASS=/tmp/git-askpass.sh GIT_TERMINAL_PROMPT=0 git push --force space hf-deploy:main
