@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 # Hugging Face ZeroGPU Free Tier Bootstrap Hook
 # Hugging Face Free Tier runs Gradio Spaces on ZeroGPU and requires @spaces.GPU at module top-level.
@@ -15,6 +16,7 @@ except ImportError:
 import pandas as pd
 from shiny import App, Inputs, Outputs, Session, reactive, ui
 
+from config import CONFIG
 from logger import LoggerFactory, get_logger
 
 # Import Tabs
@@ -63,17 +65,56 @@ app_ui = ui.page_navbar(
 
 
 def server(input: Inputs, output: Outputs, session: Session) -> None:
-    # Global Reactive Dataset
+    # Global Reactive Dataset and Shared Clinical Analysis State
     shared_dataset: reactive.Value[pd.DataFrame | None] = reactive.Value(None)
+    var_meta: reactive.Value[dict[str, Any]] = reactive.Value({})
+    uploaded_file_info: reactive.Value[dict[str, Any] | None] = reactive.Value(None)
+    df_matched: reactive.Value[pd.DataFrame | None] = reactive.Value(None)
+    is_matched: reactive.Value[bool] = reactive.Value(False)
+    matched_treatment_col: reactive.Value[str | None] = reactive.Value(None)
+    matched_covariates: reactive.Value[list[str]] = reactive.Value([])
+    mi_imputed_datasets: reactive.Value[list[pd.DataFrame]] = reactive.Value([])
 
     # Initialize Modules
     tab_ai_copilot.ai_copilot_server("ai_copilot", shared_dataset)
-    tab_data.data_server("data", shared_dataset)
-    tab_survival.survival_server("survival", shared_dataset)
-    tab_core_regression.core_regression_server("regression", shared_dataset)
-    tab_sample_size.sample_size_server("sample_size", shared_dataset)
-    tab_baseline_matching.baseline_matching_server("bm", shared_dataset)
-    tab_settings.settings_server("settings")
+    tab_data.data_server(
+        "data",
+        shared_dataset,
+        var_meta,
+        uploaded_file_info,
+        df_matched,
+        is_matched,
+        matched_treatment_col,
+        matched_covariates,
+        mi_imputed_datasets,
+    )
+    tab_survival.survival_server(
+        "survival",
+        shared_dataset,
+        var_meta,
+        df_matched,
+        is_matched,
+        mi_imputed_datasets,
+    )
+    tab_core_regression.core_regression_server(
+        "regression",
+        shared_dataset,
+        var_meta,
+        df_matched,
+        is_matched,
+        mi_imputed_datasets,
+    )
+    tab_sample_size.sample_size_server("sample_size")
+    tab_baseline_matching.baseline_matching_server(
+        "bm",
+        shared_dataset,
+        var_meta,
+        df_matched,
+        is_matched,
+        matched_treatment_col,
+        matched_covariates,
+    )
+    tab_settings.settings_server("settings", CONFIG)
 
 
 # Create Shiny App
