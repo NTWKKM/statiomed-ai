@@ -130,13 +130,33 @@ class ProposalParser:
             return path.read_text(encoding="utf-8", errors="ignore")
 
     @classmethod
+    def _is_existing_file(cls, text_or_path: str | Path) -> bool:
+        """Safely checks if input is an existing filesystem path without raising OSError on long text."""
+        if isinstance(text_or_path, Path):
+            try:
+                return text_or_path.is_file()
+            except (OSError, ValueError):
+                return False
+
+        if isinstance(text_or_path, str):
+            # If string contains newlines or exceeds typical filesystem filename length, treat as raw text
+            if "\n" in text_or_path or len(text_or_path) > 255:
+                return False
+            try:
+                return Path(text_or_path).is_file()
+            except (OSError, ValueError):
+                return False
+
+        return False
+
+    @classmethod
     def parse_proposal(cls, text_or_path: str | Path) -> ProposalMetadata:
         """
         Parses proposal text or file and extracts structured clinical PICO,
         study design, and statistical recommendations.
         """
         raw_text = ""
-        if isinstance(text_or_path, (str, Path)) and Path(str(text_or_path)).is_file():
+        if cls._is_existing_file(text_or_path):
             raw_text = cls.extract_text(text_or_path)
         else:
             raw_text = str(text_or_path)
