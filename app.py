@@ -45,37 +45,114 @@ from views import (
 LoggerFactory.configure()
 logger = get_logger(__name__)
 
-# Custom Theme & Styling for Clinical Grade UI
-custom_css = """
-.gradio-container {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
-    max-width: 1400px !important;
-    margin: auto !important;
-}
-.header-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: rgba(16, 185, 129, 0.1);
-    color: #059669;
-    border: 1px solid rgba(16, 185, 129, 0.2);
-    padding: 4px 12px;
-    border-radius: 9999px;
-    font-size: 0.82rem;
-    font-weight: 600;
-}
-"""
-
+# =============================================================================
+# CLINICAL LIGHT THEME & STYLING TOKENS
+# =============================================================================
 theme = gr.themes.Soft(
     primary_hue="blue",
     secondary_hue="slate",
     neutral_hue="slate",
-    font=[gr.themes.GoogleFont("Inter"), "ui-sans-serif", "system-ui", "sans-serif"],
+    font=[
+        gr.themes.GoogleFont("Inter"),
+        "ui-sans-serif",
+        "-apple-system",
+        "system-ui",
+        "sans-serif",
+    ],
 ).set(
+    body_background_fill="#f8fafc",
+    body_text_color="#0f172a",
+    body_text_color_subdued="#475569",
+    background_fill_primary="#ffffff",
+    background_fill_secondary="#f1f5f9",
+    block_background_fill="#ffffff",
+    block_border_color="#e2e8f0",
+    block_label_text_color="#1e293b",
+    block_title_text_color="#0f172a",
+    input_background_fill="#ffffff",
+    input_border_color="#cbd5e1",
+    input_border_color_focus="#0284c7",
     button_primary_background_fill="#0284c7",
     button_primary_background_fill_hover="#0369a1",
     button_primary_text_color="#ffffff",
+    button_secondary_background_fill="#ffffff",
+    button_secondary_background_fill_hover="#f8fafc",
+    button_secondary_border_color="#cbd5e1",
+    button_secondary_text_color="#0f172a",
 )
+
+custom_css = """
+:root, body, html {
+    color-scheme: light !important;
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+}
+
+/* Force light theme tokens across dark mode overrides */
+.dark, body.dark, html.dark {
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+    --background-fill-primary: #ffffff !important;
+    --background-fill-secondary: #f1f5f9 !important;
+    --body-background-fill: #f8fafc !important;
+    --body-text-color: #0f172a !important;
+    --block-background-fill: #ffffff !important;
+    --block-border-color: #e2e8f0 !important;
+    --input-background-fill: #ffffff !important;
+    --input-text-color: #0f172a !important;
+}
+
+.gradio-container {
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+    max-width: 1400px !important;
+    margin: auto !important;
+    background-color: #f8fafc !important;
+}
+
+.header-container {
+    background: #ffffff;
+    border-radius: 12px;
+    padding: 8px 20px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+    margin-bottom: 16px;
+}
+
+.header-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #f0fdf4;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+    padding: 4px 14px;
+    border-radius: 9999px;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.tab-nav button {
+    font-weight: 500 !important;
+    color: #475569 !important;
+    font-size: 0.92rem !important;
+}
+
+.tab-nav button.selected {
+    color: #0284c7 !important;
+    border-bottom: 2px solid #0284c7 !important;
+    font-weight: 600 !important;
+}
+"""
+
+startup_js = """
+() => {
+    document.documentElement.classList.remove('dark');
+    document.body.classList.remove('dark');
+    if (window.localStorage) {
+        localStorage.setItem('theme', 'light');
+    }
+}
+"""
 
 
 def build_app() -> gr.Blocks:
@@ -92,7 +169,7 @@ def build_app() -> gr.Blocks:
         with gr.Row(elem_classes=["header-container"]):
             gr.HTML(
                 """
-                <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0 16px 0; border-bottom: 1px solid #e2e8f0; margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; width: 100%;">
                     <div>
                         <h2 style="margin: 0; color: #0f172a; font-size: 1.6rem; font-weight: 700; display: flex; align-items: center; gap: 8px;">
                             <span>🏥</span> StatioMed AI
@@ -105,7 +182,7 @@ def build_app() -> gr.Blocks:
                         <span class="header-badge">
                             <span>🔒</span> Zero-PHI Boundary Verified
                         </span>
-                        <div style="color: #94a3b8; font-size: 0.78rem; margin-top: 4px;">
+                        <div style="color: #64748b; font-size: 0.78rem; margin-top: 4px;">
                             SAMPL & R 4.3.3 Benchmark Compliance
                         </div>
                     </div>
@@ -128,8 +205,8 @@ def build_app() -> gr.Blocks:
         # Footer
         gr.HTML(
             """
-            <div style="text-align: center; color: #94a3b8; font-size: 0.8rem; padding: 24px 0 12px 0; border-top: 1px solid #f1f5f9; margin-top: 24px;">
-                StatioMed AI © 2026 | Built for Clinical Researchers & Biostatisticians | Powered by Gradio & smolagents
+            <div style="text-align: center; color: #64748b; font-size: 0.82rem; padding: 24px 0 12px 0; border-top: 1px solid #e2e8f0; margin-top: 24px;">
+                StatioMed AI © 2026 | Built for Clinical Researchers & Biostatisticians | Powered by Gradio 6.x & smolagents
             </div>
             """
         )
@@ -142,11 +219,14 @@ app = demo
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", os.environ.get("GRADIO_SERVER_PORT", 7860)))
-    logger.info(f"🚀 Launching StatioMed AI Native Gradio on port {port}...")
+    logger.info(
+        f"🚀 Launching StatioMed AI Native Gradio on port {port} (Clinical Light Theme)..."
+    )
     demo.queue().launch(
         server_name="0.0.0.0",
         server_port=port,
         theme=theme,
         css=custom_css,
+        js=startup_js,
         ssr_mode=False,
     )
