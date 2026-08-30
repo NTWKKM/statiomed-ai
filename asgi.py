@@ -1,11 +1,9 @@
 """
-asgi.py - Production ASGI Entry Point for Docker & Hugging Face Spaces
+asgi.py - StatioMed AI Entry Point for Hugging Face Spaces (ZeroGPU Free Tier)
 =============================================================================
-Hosts Shiny for Python natively on Starlette ASGI with:
-1. Direct root routing (/) for Shiny with full reactivity & WebSocket support.
-2. Static file serving (/static) with GZip compression.
-3. Zero-overhead Gunicorn + UvicornWorker execution in Docker containers.
-4. Top-level Gradio Blocks bridge & @spaces.GPU probe for ZeroGPU compatibility.
+Hugging Face Spaces Free Tier mandates ZeroGPU with Gradio SDK.
+This module bridges Shiny for Python into Gradio Blocks with native @spaces.GPU
+ZeroGPU startup hooks, mounting the full Shiny application seamlessly.
 =============================================================================
 """
 
@@ -13,15 +11,15 @@ from __future__ import annotations
 
 import logging
 import os
-from contextlib import asynccontextmanager
 from pathlib import Path
 
-# ZeroGPU Compatibility Hook
+# Hugging Face ZeroGPU Free Tier Decorator
 try:
     import spaces
 
     @spaces.GPU(duration=60)
     def _zerogpu_probe_fn(text: str = "") -> str:
+        """Hugging Face ZeroGPU supervisor startup probe."""
         return f"StatioMed AI ZeroGPU Active: {text}"
 
 except ImportError:
@@ -30,10 +28,8 @@ except ImportError:
         return "StatioMed AI CPU Active"
 
 
-from starlette.applications import Starlette
-from starlette.middleware import Middleware
-from starlette.middleware.gzip import GZipMiddleware
-from starlette.routing import Mount
+import gradio as gr
+from gradio.routes import App
 from starlette.staticfiles import StaticFiles
 
 from app import shiny_app
@@ -49,59 +45,89 @@ logger = logging.getLogger(__name__)
 # Static files directory
 STATIC_DIR = Path(__file__).parent / "static"
 
-
-@asynccontextmanager
-async def lifespan(app: Starlette):
-    logger.info("🚀 Starting StatioMed AI (Starlette ASGI Gateway)...")
-    logger.info(f"📁 Static files directory: {STATIC_DIR}")
-    yield
-    logger.info("👋 Shutting down application...")
+# Patch Gradio's App.create_app to mount Shiny & static files BEFORE middleware compilation
+_orig_create_app = App.create_app
 
 
-# Routes: Static files first, Shiny app at root (catch-all)
-routes = []
-if STATIC_DIR.exists():
-    routes.append(
-        Mount("/static", app=StaticFiles(directory=str(STATIC_DIR)), name="static")
+@staticmethod
+def _custom_create_app(*args, **kwargs):
+    app = _orig_create_app(*args, **kwargs)
+    if STATIC_DIR.exists():
+        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.mount("/shiny", shiny_app, name="shiny")
+    return app
+
+
+App.create_app = _custom_create_app
+
+# Build Top-Level Gradio Blocks UI (Required by Hugging Face ZeroGPU Supervisor)
+custom_css = """
+body, html {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    background-color: #ffffff !important;
+}
+footer {
+    display: none !important;
+}
+.gradio-container {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    height: 100vh !important;
+    overflow: hidden !important;
+    background-color: #ffffff !important;
+}
+iframe {
+    width: 100vw !important;
+    height: 100vh !important;
+    border: none !important;
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background-color: #ffffff !important;
+}
+"""
+
+with gr.Blocks(
+    title="StatioMed AI — Clinical Research & Biostatistical Co-Pilot",
+) as demo:
+    # ZeroGPU event listener binding required by HF ZeroGPU startup scanner
+    _probe_inp = gr.Textbox(visible=False)
+    _probe_btn = gr.Button("Probe", visible=False)
+    _probe_out = gr.Textbox(visible=False)
+    _probe_btn.click(fn=_zerogpu_probe_fn, inputs=_probe_inp, outputs=_probe_out)
+
+    # Full-screen responsive iframe hosting the mounted Shiny for Python application
+    gr.HTML(
+        '<iframe src="/shiny/" '
+        'style="width: 100vw; height: 100vh; border: none; overflow: hidden; display: block; background: #ffffff;" '
+        'allow="camera; microphone; clipboard-read; clipboard-write;"></iframe>'
     )
-routes.append(Mount("/", app=shiny_app, name="shiny"))
 
-# Middleware stack
-middleware = [
-    Middleware(GZipMiddleware, minimum_size=500),
-]
+# Disable Node.js SSR proxy so Python FastAPI handles port 7860 directly
+os.environ["GRADIO_SSR_MODE"] = "False"
 
-# Canonical ASGI application for Gunicorn / Uvicorn (Docker SDK)
-app = Starlette(
-    routes=routes,
-    middleware=middleware,
-    lifespan=lifespan,
-)
+# Mount on demo.app initial reference as fallback
+if STATIC_DIR.exists():
+    demo.app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+demo.app.mount("/shiny", shiny_app, name="shiny")
 
-# Optional Gradio Blocks bridge for ZeroGPU supervisor discovery
-try:
-    import gradio as gr
+# Export ASGI app instance for direct ASGI servers / health checks
+app = demo.app
 
-    with gr.Blocks(title="StatioMed AI") as demo:
-        _inp = gr.Textbox(visible=False)
-        _btn = gr.Button("Probe", visible=False)
-        _out = gr.Textbox(visible=False)
-        _btn.click(fn=_zerogpu_probe_fn, inputs=_inp, outputs=_out)
-
-    # Pre-generate config so Gradio never crashes on missing config
-    demo.config = demo.get_config_file()
-except Exception:
-    demo = None
-
-# Development / Direct Execution
+# Hugging Face Gradio Entry Point
 if __name__ == "__main__":
-    import uvicorn
-
     port = int(os.environ.get("PORT", os.environ.get("GRADIO_SERVER_PORT", 7860)))
-    logger.info(f"🚀 Starting Uvicorn on 0.0.0.0:{port}...")
-    uvicorn.run(
-        "asgi:app",
-        host="0.0.0.0",
-        port=port,
-        log_level="info",
+    logger.info("🚀 Launching StatioMed AI on Hugging Face ZeroGPU Gradio Gateway...")
+    demo.queue().launch(
+        server_name="0.0.0.0",
+        server_port=port,
+        ssr_mode=False,
+        theme=gr.themes.Base(),
+        css=custom_css,
+        allowed_paths=["/shiny", str(STATIC_DIR)],
     )
