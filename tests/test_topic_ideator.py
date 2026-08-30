@@ -2,10 +2,20 @@
 tests/test_topic_ideator.py - Unit tests for Clinical Topic Ideator & Proposal Synthesis
 """
 
+import pytest
 
 from agent.clinical_analyst import ClinicalAnalystEngine
+from agent.tools.tool_pubmed import PubMedEvidenceTool
 from agent.topic_ideator import ClinicalTopicIdeator, ResearchProposalOption
 from core.state import AppState
+
+
+@pytest.fixture(autouse=True)
+def stub_pubmed_search(monkeypatch):
+    """Avoid live NCBI HTTP requests in topic ideator unit tests."""
+    monkeypatch.setattr(
+        PubMedEvidenceTool, "search_and_extract", lambda self, q, max_results=3: []
+    )
 
 
 def test_normalize_query():
@@ -15,7 +25,7 @@ def test_normalize_query():
 
 
 def test_generate_research_directions_dyspnea():
-    options, articles, norm_q = ClinicalTopicIdeator.generate_research_directions(
+    options, _articles, _norm_q = ClinicalTopicIdeator.generate_research_directions(
         "dyspnea"
     )
     assert len(options) == 5
@@ -31,7 +41,7 @@ def test_generate_research_directions_dyspnea():
 
 
 def test_format_proposals_markdown():
-    options, articles, norm_q = ClinicalTopicIdeator.generate_research_directions(
+    options, articles, _norm_q = ClinicalTopicIdeator.generate_research_directions(
         "dyspnea"
     )
     md = ClinicalTopicIdeator.format_proposals_markdown("dyspnea", options, articles)
@@ -44,7 +54,7 @@ def test_format_proposals_markdown():
 def test_clinical_analyst_turn_dyspnea_ideation():
     state = AppState()
     msg = "dyspnea"
-    resp_md, new_state, fig, preview_df = ClinicalAnalystEngine.process_turn(
+    resp_md, _new_state, _fig, _preview_df = ClinicalAnalystEngine.process_turn(
         user_message=msg,
         file_paths=None,
         state=state,
@@ -57,7 +67,7 @@ def test_clinical_analyst_turn_dyspnea_ideation():
 def test_clinical_analyst_turn_select_option_2():
     state = AppState()
     msg = "เลือกข้อ 2 สร้าง synthetic data แล้วรัน survival ให้ดู"
-    resp_md, new_state, fig, preview_df = ClinicalAnalystEngine.process_turn(
+    resp_md, new_state, fig, _preview_df = ClinicalAnalystEngine.process_turn(
         user_message=msg,
         file_paths=None,
         state=state,
@@ -65,4 +75,18 @@ def test_clinical_analyst_turn_select_option_2():
     assert new_state.has_data()
     assert "Kaplan-Meier" in resp_md
     assert "Option 2" in new_state.file_name or "Cohort" in new_state.file_name
+    assert fig is not None
+
+
+def test_clinical_analyst_turn_select_option_3():
+    state = AppState()
+    msg = "เลือกข้อ 3 วิเคราะห์ diagnostic accuracy"
+    resp_md, new_state, fig, _preview_df = ClinicalAnalystEngine.process_turn(
+        user_message=msg,
+        file_paths=None,
+        state=state,
+    )
+    assert new_state.has_data()
+    assert "Option 3" in new_state.file_name or "Diagnostic" in resp_md
+    assert "Sensitivity" in resp_md
     assert fig is not None

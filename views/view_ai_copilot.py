@@ -10,6 +10,7 @@ methodology determination, and immediate deterministic execution harness.
 from __future__ import annotations
 
 import html
+from pathlib import Path
 from typing import Any
 
 import gradio as gr
@@ -110,7 +111,7 @@ def chat_submit_action(
         for f in uploaded_files:
             p = f.name if hasattr(f, "name") else str(f)
             files_list.append(p)
-            file_names.append(pd.io.common.os.path.basename(p))
+            file_names.append(Path(p).name)
 
     msg_to_send = (user_message or "").strip()
     if not msg_to_send and not files_list:
@@ -155,7 +156,7 @@ def chat_submit_action(
         )
 
     except Exception as e:
-        logger.error(f"Chat Action Error: {e}")
+        logger.exception("Chat Action Error: %s", e)
         err_msg = f"❌ เกิดข้อผิดพลาดในการประมวลผล: {html.escape(str(e))}"
         chat_history.append({"role": "assistant", "content": err_msg})
         return chat_history, "", None, state, go.Figure(), state.df, ""

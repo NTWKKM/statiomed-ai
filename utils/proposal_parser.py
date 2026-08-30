@@ -54,14 +54,37 @@ class ProposalMetadata:
         }
 
 
+def _has_keyword(text: str, keywords: list[str]) -> bool:
+    """
+    Checks if any keyword is present in text.
+    Uses ASCII word-boundary matching for alphanumeric ASCII keywords to avoid substring collisions
+    (e.g., 'rct' inside 'infarction', 'roc' inside 'process', 'km' inside 'pharmacokinetics', 'mean' inside 'treatment'),
+    while preserving plain substring containment for non-ASCII (e.g. Thai) keywords or phrases.
+    """
+    lower = text.lower()
+    for k in keywords:
+        k_str = k.strip()
+        if not k_str:
+            continue
+        if any(ord(c) > 127 for c in k_str):
+            if k_str in lower:
+                return True
+        elif re.fullmatch(r"[A-Za-z0-9_\-]+", k_str):
+            if re.search(rf"\b{re.escape(k_str)}\b", lower, re.IGNORECASE):
+                return True
+        else:
+            if k_str.lower() in lower:
+                return True
+    return False
+
+
 class ProposalParser:
     """
-    Parser for research proposals, study protocols, and synopses.
-    Supports .docx (via standard zipfile + XML), .txt, .md, and raw text.
+    Parses and structures clinical proposals, protocols, and study summaries.
     """
 
-    @staticmethod
-    def extract_text_from_docx(file_path: str | Path) -> str:
+    @classmethod
+    def extract_text_from_docx(cls, file_path: str | Path) -> str:
         """
         Extracts plain text from a Microsoft Word .docx file using standard library zipfile + XML.
         """
@@ -72,7 +95,13 @@ class ProposalParser:
         try:
             with zipfile.ZipFile(path) as z:
                 xml_content = z.read("word/document.xml")
-                tree = ET.fromstring(xml_content)
+                try:
+                    import defusedxml.ElementTree as hardened_ET
+
+                    tree = hardened_ET.fromstring(xml_content)
+                except ImportError:
+                    parser = ET.XMLParser()
+                    tree = ET.fromstring(xml_content, parser=parser)
 
                 # XML namespaces in Word documents
                 ns = {
@@ -109,9 +138,9 @@ class ProposalParser:
         if suffix in [".docx", ".doc"]:
             try:
                 return cls.extract_text_from_docx(path)
-            except Exception:
-                # If binary .doc or corrupted, attempt text read
-                return path.read_text(errors="ignore")
+            except Exception as e:
+                logger.warning(f"Document extraction failed for {path}: {e}")
+                return ""
         elif suffix in [".txt", ".md", ".json", ".log"]:
             return path.read_text(encoding="utf-8", errors="ignore")
         elif suffix == ".pdf":
@@ -124,8 +153,8 @@ class ProposalParser:
                 ]
                 return "\n\n".join(pages)
             except Exception as e:
-                logger.warning(f"PDF extraction failed: {e}")
-                return path.read_text(errors="ignore")
+                logger.warning(f"PDF extraction failed for {path}: {e}")
+                return ""
         else:
             return path.read_text(encoding="utf-8", errors="ignore")
 
@@ -173,20 +202,20 @@ class ProposalParser:
             meta.title = lines[0][:150]
 
         # 2. Identify Study Design
-        if any(
-            k in lower_text
-            for k in [
+        if _has_keyword(
+            lower_text,
+            [
                 "randomized controlled",
                 "rct",
                 "randomised",
                 "clinical trial",
                 "ทดลองทางคลินิก",
-            ]
+            ],
         ):
             meta.study_design = "Randomized Controlled Trial (RCT)"
-        elif any(
-            k in lower_text
-            for k in [
+        elif _has_keyword(
+            lower_text,
+            [
                 "survival",
                 "time to event",
                 "mortality",
@@ -196,32 +225,32 @@ class ProposalParser:
                 "retrospective",
                 "การรอดชีพ",
                 "ติดตามผล",
-            ]
+            ],
         ):
             meta.study_design = "Observational Cohort Study (Time-to-Event / Survival)"
-        elif any(
-            k in lower_text
-            for k in [
+        elif _has_keyword(
+            lower_text,
+            [
                 "case-control",
                 "case control",
                 "odds ratio",
                 "กลุ่มควบคุม",
-            ]
+            ],
         ):
             meta.study_design = "Case-Control Study"
-        elif any(
-            k in lower_text
-            for k in [
+        elif _has_keyword(
+            lower_text,
+            [
                 "cross-sectional",
                 "prevalence",
                 "survey",
                 "ภาคตัดขวาง",
-            ]
+            ],
         ):
             meta.study_design = "Cross-Sectional Study"
-        elif any(
-            k in lower_text
-            for k in [
+        elif _has_keyword(
+            lower_text,
+            [
                 "diagnostic",
                 "sensitivity",
                 "specificity",
@@ -229,7 +258,7 @@ class ProposalParser:
                 "fagan",
                 "ความไว",
                 "ความจำเพาะ",
-            ]
+            ],
         ):
             meta.study_design = "Diagnostic Accuracy Study"
         else:
@@ -348,33 +377,35 @@ class ProposalParser:
             "Baseline Characteristics Table (Table 1) with Standardized Mean Differences (SMD)"
         )
 
-        if "survival" in meta.study_design.lower() or any(
-            k in lower_text
-            for k in [
+        if "survival" in meta.study_design.lower() or _has_keyword(
+            lower_text,
+            [
                 "survival",
                 "time to event",
                 "mortality",
                 "cox",
                 "kaplan-meier",
                 "km",
-            ]
+            ],
         ):
             recommended.append("Kaplan-Meier Survival Curves with Log-Rank Test")
             recommended.append(
                 "Multivariable Cox Proportional Hazards Model (Efron tie handling & Schoenfeld residual test)"
             )
 
-        if (
-            "logistic" in lower_text
-            or "binary" in lower_text
-            or "case-control" in meta.study_design.lower()
-            or "odds ratio" in lower_text
+        if "case-control" in meta.study_design.lower() or _has_keyword(
+            lower_text,
+            [
+                "logistic",
+                "binary",
+                "odds ratio",
+            ],
         ):
             recommended.append(
                 "Multivariable Logistic Regression (Odds Ratios, 95% CI & McFadden Pseudo-R²)"
             )
 
-        if "continuous" in lower_text or "linear" in lower_text or "mean" in lower_text:
+        if _has_keyword(lower_text, ["continuous", "linear", "mean"]):
             recommended.append(
                 "Multivariable Ordinary Least Squares (OLS) Linear Regression with Homoscedasticity & Normality Diagnostics"
             )
@@ -387,7 +418,9 @@ class ProposalParser:
                 "Propensity Score Matching (PSM) with Caliper Balance Assessment (Love Plot)"
             )
 
-        if "diagnostic" in meta.study_design.lower() or "accuracy" in lower_text:
+        if "diagnostic" in meta.study_design.lower() or _has_keyword(
+            lower_text, ["accuracy", "sensitivity", "specificity", "roc", "fagan"]
+        ):
             recommended.append(
                 "Diagnostic Accuracy Matrix (Sensitivity, Specificity, PPV, NPV, ROC/AUC, Fagan Nomogram)"
             )

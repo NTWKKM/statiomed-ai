@@ -16,6 +16,6 @@ if (
     and not os.environ.get("_PYTEST_FORWARDED")
 ):
     os.environ["_PYTEST_FORWARDED"] = "1"
-    args = [str(VENV_PYTEST)] + [a for a in sys.argv[1:] if a != "pytest"]
+    args = [str(VENV_PYTEST)] + sys.argv[1:]
     res = subprocess.run(args)
     sys.exit(res.returncode)

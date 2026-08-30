@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 from agent.tools.tool_pubmed import PubMedEvidenceTool
 from logger import get_logger
@@ -44,7 +44,7 @@ class ClinicalTopicIdeator:
     """
 
     # Keyword normalization dictionary (Thai -> English medical terms)
-    TOPIC_SYNONYMS: dict[str, str] = {
+    TOPIC_SYNONYMS: ClassVar[dict[str, str]] = {
         "dyspnea": "acute dyspnea heart failure COPD",
         "เหนื่อย": "acute dyspnea heart failure COPD",
         "หอบ": "acute dyspnea asthma COPD exacerbation",
@@ -68,6 +68,9 @@ class ClinicalTopicIdeator:
         "dka": "diabetic ketoacidosis fluid protocol insulin",
     }
 
+    _pubmed_tool: ClassVar[PubMedEvidenceTool] = PubMedEvidenceTool()
+    _pubmed_cache: ClassVar[dict[str, list[dict[str, Any]]]] = {}
+
     @classmethod
     def normalize_query(cls, query: str) -> str:
         """Normalizes user query to optimal PubMed search string."""
@@ -87,13 +90,17 @@ class ClinicalTopicIdeator:
         Retrieves PubMed evidence and formulates 5 structured research directions.
         """
         norm_query = cls.normalize_query(clinical_topic)
-        pubmed_tool = PubMedEvidenceTool()
-
-        articles: list[dict[str, Any]] = []
-        try:
-            articles = pubmed_tool.search_and_extract(norm_query, max_results=3)
-        except Exception as e:
-            logger.warning(f"PubMed search error: {e}")
+        if norm_query in cls._pubmed_cache:
+            articles = cls._pubmed_cache[norm_query]
+        else:
+            articles = []
+            try:
+                articles = cls._pubmed_tool.search_and_extract(
+                    norm_query, max_results=3
+                )
+                cls._pubmed_cache[norm_query] = articles
+            except Exception as e:
+                logger.warning(f"PubMed search error: {e}")
 
         topic_clean = clinical_topic.strip().title()
 

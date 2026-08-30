@@ -141,14 +141,14 @@ class StatHarness:
                     else getattr(r, "or_val", 1.0)
                 )
                 ci_l = (
-                    r.get("ci_lower", 1.0)
+                    r.get("ci_low", r.get("ci_lower", 1.0))
                     if isinstance(r, dict)
-                    else getattr(r, "ci_lower", 1.0)
+                    else getattr(r, "ci_low", getattr(r, "ci_lower", 1.0))
                 )
                 ci_u = (
-                    r.get("ci_upper", 1.0)
+                    r.get("ci_high", r.get("ci_upper", 1.0))
                     if isinstance(r, dict)
-                    else getattr(r, "ci_upper", 1.0)
+                    else getattr(r, "ci_high", getattr(r, "ci_upper", 1.0))
                 )
                 p_v = (
                     r.get("p_value", 1.0)
@@ -210,6 +210,103 @@ class StatHarness:
             )
 
         return coef_df, metrics or {}, fig
+
+    @staticmethod
+    def run_diagnostic(
+        df: pd.DataFrame,
+        tp: int = 85,
+        fp: int = 15,
+        fn: int = 15,
+        tn: int = 185,
+        pre_test_prob: float = 25.0,
+    ) -> tuple[pd.DataFrame, dict[str, Any], go.Figure]:
+        """Calculates Diagnostic Test Accuracy (STARD 2015) & Bayesian Fagan Nomogram."""
+        sens = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        spec = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+        ppv = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        npv = tn / (tn + fn) if (tn + fn) > 0 else 0.0
+        lr_pos = (sens / (1.0 - spec)) if (1.0 - spec) > 0 else 1.0
+        lr_neg = ((1.0 - sens) / spec) if spec > 0 else 1.0
+        dor = ((tp * tn) / (fp * fn)) if (fp * fn) > 0 else 1.0
+
+        p_pre = pre_test_prob / 100.0
+        odds_pre = p_pre / (1.0 - p_pre) if p_pre < 1.0 else 999.0
+        odds_post_pos = odds_pre * lr_pos
+        p_post_pos = (odds_post_pos / (1.0 + odds_post_pos)) * 100.0
+
+        odds_post_neg = odds_pre * lr_neg
+        p_post_neg = (odds_post_neg / (1.0 + odds_post_neg)) * 100.0
+
+        metrics_df = pd.DataFrame(
+            [
+                {"Metric": "Sensitivity (True Positive Rate)", "Value": f"{sens:.1%}"},
+                {"Metric": "Specificity (True Negative Rate)", "Value": f"{spec:.1%}"},
+                {"Metric": "Positive Predictive Value (PPV)", "Value": f"{ppv:.1%}"},
+                {"Metric": "Negative Predictive Value (NPV)", "Value": f"{npv:.1%}"},
+                {"Metric": "Positive Likelihood Ratio (LR+)", "Value": f"{lr_pos:.2f}"},
+                {"Metric": "Negative Likelihood Ratio (LR-)", "Value": f"{lr_neg:.2f}"},
+                {"Metric": "Diagnostic Odds Ratio (DOR)", "Value": f"{dor:.2f}"},
+            ]
+        )
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=[0, 1, 2],
+                y=[pre_test_prob, lr_pos, p_post_pos],
+                mode="lines+markers+text",
+                text=[
+                    f"Pre: {pre_test_prob:.0f}%",
+                    f"LR+: {lr_pos:.1f}",
+                    f"Post: {p_post_pos:.1f}%",
+                ],
+                textposition="top center",
+                line=dict(color="#059669", width=3),
+                name="Positive Result (+LR)",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[0, 1, 2],
+                y=[pre_test_prob, lr_neg, p_post_neg],
+                mode="lines+markers+text",
+                text=[
+                    f"Pre: {pre_test_prob:.0f}%",
+                    f"LR-: {lr_neg:.2f}",
+                    f"Post: {p_post_neg:.1f}%",
+                ],
+                textposition="bottom center",
+                line=dict(color="#dc2626", width=3, dash="dash"),
+                name="Negative Result (-LR)",
+            )
+        )
+        fig.update_layout(
+            title="Bayesian Updating Trajectory (Pre-test to Post-test Probability)",
+            xaxis=dict(
+                tickvals=[0, 1, 2],
+                ticktext=[
+                    "Pre-Test Prob (%)",
+                    "Likelihood Ratio",
+                    "Post-Test Prob (%)",
+                ],
+            ),
+            yaxis_title="Probability (%) / Ratio",
+            height=350,
+            margin=dict(l=20, r=20, t=40, b=20),
+        )
+
+        metrics = {
+            "sensitivity": sens,
+            "specificity": spec,
+            "ppv": ppv,
+            "npv": npv,
+            "lr_pos": lr_pos,
+            "lr_neg": lr_neg,
+            "dor": dor,
+            "post_prob_pos": p_post_pos,
+            "post_prob_neg": p_post_neg,
+        }
+        return metrics_df, metrics, fig
 
     @staticmethod
     def run_linear(
@@ -287,19 +384,17 @@ class ClinicalAnalystEngine:
                     logger.error(f"Error loading dataset {p.name}: {e}")
 
         # If user pasted raw proposal text in the prompt
-        if not proposal_meta and (
-            len(user_msg) > 200
-            or any(
-                k in lower_msg
-                for k in [
-                    "pico",
-                    "population",
-                    "intervention",
-                    "primary outcome",
-                    "proposal",
-                    "ระเบียบวิธีวิจัย",
-                ]
-            )
+        if not proposal_meta and any(
+            k in lower_msg
+            for k in [
+                "pico",
+                "population",
+                "intervention",
+                "primary outcome",
+                "proposal",
+                "ระเบียบวิธีวิจัย",
+                "โครงร่างงานวิจัย",
+            ]
         ):
             proposal_meta = ProposalParser.parse_proposal(user_msg)
 
@@ -360,6 +455,25 @@ class ClinicalAnalystEngine:
 - **สถานะ:** ข้อมูลถูกบันทึกเข้า session และเรนเดอร์กราฟในหน้าต่าง Visual Output เรียบร้อยแล้วครับ
 """
                 return response_md, state, fig, df_gen
+            elif opt_id == 3:
+                metrics_df, metrics, fig = StatHarness.run_diagnostic(df_gen)
+                response_md = f"""### 🚀 ดำเนินการวิเคราะห์แนวทางที่ {opt_id} (Diagnostic Accuracy & Fagan Nomogram - STARD 2015)
+
+**สร้างชุดข้อมูลจำลองตามแนวทางที่ {opt_id}:** `{state.file_name}` (n = {len(df_gen):,} ราย)
+
+#### 1. ผลการประเมินความแม่นยำในการวินิจฉัย (Diagnostic Performance Metrics):
+- **Sensitivity (ความไว):** `{metrics["sensitivity"]:.1%}` | **Specificity (ความจำเพาะ):** `{metrics["specificity"]:.1%}`
+- **Positive Likelihood Ratio (LR+):** `{metrics["lr_pos"]:.2f}` | **Negative Likelihood Ratio (LR-):** `{metrics["lr_neg"]:.2f}`
+- **Diagnostic Odds Ratio (DOR):** `{metrics["dor"]:.2f}`
+
+#### 2. Bayesian Pre-test to Post-test Updating (Fagan Nomogram):
+- **Pre-Test Probability:** `25.0%`
+- **Post-Test Probability (Positive Test):** `{metrics["post_prob_pos"]:.1f}%`
+- **Post-Test Probability (Negative Test):** `{metrics["post_prob_neg"]:.1f}%`
+
+{metrics_df.to_markdown(index=False)}
+"""
+                return response_md, state, fig, df_gen
             elif opt_id in [4, 5]:
                 coef_df, metrics, fig = StatHarness.run_logistic(
                     df_gen,
@@ -373,6 +487,17 @@ class ClinicalAnalystEngine:
 **McFadden Pseudo-$R^2$:** `{metrics.get("mcfadden", 0.0):.4f}` | **AIC:** `{metrics.get("aic", 0.0):.1f}`
 
 {coef_df.to_markdown(index=False)}
+"""
+                return response_md, state, fig, df_gen
+            else:
+                html_table, df_sub = StatHarness.run_table_one(
+                    df_gen, group_col=treat_col
+                )
+                response_md = f"""### 🚀 ดำเนินการสร้างชุดข้อมูลตามแนวทางที่ {opt_id} (Baseline Characteristics & Table 1)
+
+**สร้างชุดข้อมูลจำลองตามแนวทางที่ {opt_id}:** `{state.file_name}` (n = {len(df_gen):,} ราย)
+
+ชุดข้อมูลถูกบันทึกเข้า session เรียบร้อยแล้ว พร้อมสำหรับการวิเคราะห์ขั้นต่อไปครับ
 """
                 return response_md, state, fig, df_gen
 
@@ -525,8 +650,8 @@ class ClinicalAnalystEngine:
 | :--- | :--- |
 | **Exposure / Control Event Rate ($p_1$)** | `{res["p1_control"]:.1%}` |
 | **Intervention / Experimental Event Rate ($p_2$)** | `{res["p2_intervention"]:.1%}` |
-| **Type I Error ($\alpha$, 2-sided)** | `{alpha}` (95% Confidence Level) |
-| **Statistical Power ($1 - \beta$)** | `{power:.0%}` |
+| **Type I Error ($\\alpha$, 2-sided)** | `{alpha}` (95% Confidence Level) |
+| **Statistical Power ($1 - \\beta$)** | `{power:.0%}` |
 | **Expected Drop-out Rate** | `15.0%` |
 
 #### 🎯 ขนาดกลุ่มตัวอย่างที่ต้องการ (Target Sample Size):
@@ -781,9 +906,14 @@ class ClinicalAnalystEngine:
 
         # Default conversational / General biostatistical query
         pubmed_tool = PubMedEvidenceTool()
-        articles = pubmed_tool.search_and_extract(
-            user_msg if len(user_msg) > 5 else "clinical trial evidence", max_results=2
-        )
+        articles: list[dict[str, Any]] = []
+        try:
+            articles = pubmed_tool.search_and_extract(
+                user_msg if len(user_msg) > 5 else "clinical trial evidence",
+                max_results=2,
+            )
+        except Exception as e:
+            logger.warning(f"PubMed search error in clinical consultation: {e}")
         vancouver_list = ""
         if articles:
             vancouver_list = "\n".join(

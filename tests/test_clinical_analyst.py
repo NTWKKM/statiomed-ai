@@ -2,7 +2,6 @@
 tests/test_clinical_analyst.py - Unit tests for Clinical Analyst Engine & Statistical Harness
 """
 
-
 from agent.clinical_analyst import ClinicalAnalystEngine, StatHarness
 from core.state import AppState
 from views.view_data import generate_example_dataset
@@ -32,7 +31,7 @@ def test_stat_harness_survival():
 
 def test_stat_harness_logistic():
     df, _ = generate_example_dataset()
-    coef_df, metrics, fig = StatHarness.run_logistic(
+    coef_df, metrics, _fig = StatHarness.run_logistic(
         df=df,
         outcome_col="death",
         predictor_cols=["age", "bmi", "treatment"],
@@ -44,7 +43,7 @@ def test_stat_harness_logistic():
 
 def test_stat_harness_table_one():
     df, _ = generate_example_dataset()
-    html_table, df_sub = StatHarness.run_table_one(
+    html_table, _df_sub = StatHarness.run_table_one(
         df=df,
         group_col="treatment",
         selected_vars=["age", "bmi", "sbp", "diabetes"],
@@ -52,10 +51,18 @@ def test_stat_harness_table_one():
     assert "<table" in html_table.lower()
 
 
+def test_stat_harness_diagnostic():
+    df, _ = generate_example_dataset()
+    metrics_df, metrics, fig = StatHarness.run_diagnostic(df)
+    assert not metrics_df.empty
+    assert "sensitivity" in metrics
+    assert fig is not None
+
+
 def test_clinical_analyst_turn_synthetic_generation():
     state = AppState()
     msg = "สร้าง synthetic cohort สำหรับการทดลองรักษา SGLT2 inhibitor vs Standard care"
-    response_md, new_state, fig, preview_df = ClinicalAnalystEngine.process_turn(
+    response_md, new_state, _fig, _preview_df = ClinicalAnalystEngine.process_turn(
         user_message=msg,
         file_paths=None,
         state=state,
@@ -69,10 +76,15 @@ def test_clinical_analyst_turn_synthetic_generation():
 def test_clinical_analyst_turn_sample_size():
     state = AppState()
     msg = "คำนวณ sample size สำหรับ clinical trial 2 กลุ่ม event rate 35% vs 18% power 80%"
-    response_md, new_state, fig, preview_df = ClinicalAnalystEngine.process_turn(
+    response_md, _new_state, _fig, _preview_df = ClinicalAnalystEngine.process_turn(
         user_message=msg,
         file_paths=None,
         state=state,
     )
     assert "ผลการคำนวณขนาดกลุ่มตัวอย่าง" in response_md
     assert "Fleiss" in response_md
+    assert "35" in response_md and "%" in response_md
+    assert "18" in response_md and "%" in response_md
+    assert (
+        "\\alpha" in response_md or "alpha" in response_md.lower() or "α" in response_md
+    )
