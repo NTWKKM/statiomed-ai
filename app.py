@@ -78,17 +78,17 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
 # Create Shiny App
 shiny_app = App(app_ui, server, static_assets=Path(__file__).parent / "static")
 
-# Create Root ASGI (FastAPI) Application with Gradio Mount for Hugging Face Spaces compatibility
-from fastapi import FastAPI
+# Create Gradio App with Shiny mounted as ASGI sub-app
 from starlette.staticfiles import StaticFiles
 import gradio as gr
+from gradio.routes import App as GradioApp
 
-root_app = FastAPI(title="StatioMed AI")
+gradio_app = GradioApp()
 STATIC_DIR = Path(__file__).parent / "static"
 if STATIC_DIR.exists():
-    root_app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    gradio_app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-root_app.mount("/shiny", shiny_app)
+gradio_app.mount("/shiny", shiny_app)
 
 with gr.Blocks(
     title="StatioMed AI — Clinical Research & Biostatistical Co-Pilot"
@@ -109,16 +109,7 @@ with gr.Blocks(
         """
     )
 
-app = gr.mount_gradio_app(root_app, demo, path="/")
+app = demo.app = gradio_app
 
 if __name__ == "__main__":
-    import os
-    import uvicorn
-
-    port = int(os.environ.get("PORT", os.environ.get("GRADIO_SERVER_PORT", 7860)))
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=port,
-        loop="asyncio",
-    )
+    demo.launch(_app=gradio_app)
