@@ -111,6 +111,20 @@ def test_stat_harness_diagnostic_strict_validation():
     with pytest.raises(ValueError, match="cannot be negative"):
         StatHarness.run_diagnostic(tp=-5, fp=10, fn=5, tn=20)
 
+    # When fractional or non-integer counts are specified, ValueError must be raised without silent truncation
+    with pytest.raises(ValueError, match="must be an integer"):
+        StatHarness.run_diagnostic(tp=-0.5, fp=10, fn=5, tn=20)
+
+    with pytest.raises(ValueError, match="must be an integer"):
+        StatHarness.run_diagnostic(tp=1.9, fp=10, fn=5, tn=20)
+
+    with pytest.raises(ValueError, match="must be an integer"):
+        StatHarness.run_diagnostic(tp=True, fp=10, fn=5, tn=20)
+
+    # When all 4 counts sum to zero, ValueError must be raised
+    with pytest.raises(ValueError, match="cannot be zero"):
+        StatHarness.run_diagnostic(tp=0, fp=0, fn=0, tn=0)
+
     # When all 4 explicit counts are provided, it must succeed with used_example_counts=False
     _metrics_df2, metrics2, _fig2 = StatHarness.run_diagnostic(tp=50, fp=5, fn=5, tn=50)
     assert metrics2["used_example_counts"] is False

@@ -320,10 +320,15 @@ class StatHarness:
                 raise ValueError(
                     "Incomplete 2x2 contingency matrix: tp, fp, fn, and tn must all be specified when providing explicit cell counts."
                 )
-            if any(c < 0 for c in (int(tp), int(fp), int(fn), int(tn))):
-                raise ValueError(
-                    "2x2 contingency matrix cell counts cannot be negative."
-                )
+            for name, val in [("tp", tp), ("fp", fp), ("fn", fn), ("tn", tn)]:
+                if isinstance(val, bool) or not isinstance(val, (int, np.integer)):
+                    raise ValueError(
+                        f"2x2 contingency matrix cell count '{name}' must be an integer, got {val!r}."
+                    )
+                if val < 0:
+                    raise ValueError(
+                        f"2x2 contingency matrix cell count '{name}' cannot be negative, got {val}."
+                    )
             final_tp, final_fp, final_fn, final_tn = int(tp), int(fp), int(fn), int(tn)
             used_example_counts = False
         elif calc_tp is not None:
@@ -337,6 +342,10 @@ class StatHarness:
             )
 
         total = final_tp + final_fp + final_fn + final_tn
+        if total == 0:
+            raise ValueError(
+                "Total sample size across 2x2 contingency matrix cannot be zero."
+            )
         if pre_test_prob is None:
             if (final_tp + final_fn) > 0 and total > 0:
                 pre_test_prob = ((final_tp + final_fn) / total) * 100.0
