@@ -118,37 +118,151 @@ custom_css = """
 }
 
 .header-container {
-    background: #ffffff;
-    border-radius: 12px;
-    padding: 8px 20px;
-    border: 1px solid #e2e8f0;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
-    margin-bottom: 16px;
+    background: #ffffff !important;
+    border-radius: 12px !important;
+    padding: 10px 24px !important;
+    border: 1px solid #e2e8f0 !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+    margin-bottom: 16px !important;
 }
 
 .header-badge {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: #f0fdf4;
-    color: #166534;
-    border: 1px solid #bbf7d0;
+    background: #f0fdf4 !important;
+    color: #166534 !important;
+    border: 1px solid #86efac !important;
     padding: 4px 14px;
     border-radius: 9999px;
     font-size: 0.82rem;
     font-weight: 600;
 }
 
+/* Tab Navigation */
 .tab-nav button {
     font-weight: 500 !important;
     color: #475569 !important;
     font-size: 0.92rem !important;
+    transition: color 0.15s ease-in-out !important;
+}
+
+.tab-nav button:hover {
+    color: #0f172a !important;
 }
 
 .tab-nav button.selected {
     color: #0284c7 !important;
     border-bottom: 2px solid #0284c7 !important;
     font-weight: 600 !important;
+}
+
+/* Quick Action Chips & Secondary Buttons */
+.prompt-chips-row {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    margin: 8px 0 12px 0 !important;
+}
+
+.prompt-chips-row button,
+button.secondary,
+.gr-button-secondary {
+    background: #ffffff !important;
+    color: #1e293b !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 8px !important;
+    font-size: 0.84rem !important;
+    font-weight: 500 !important;
+    padding: 6px 14px !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+    transition: all 0.15s ease-in-out !important;
+    cursor: pointer !important;
+}
+
+.prompt-chips-row button:hover,
+button.secondary:hover,
+.gr-button-secondary:hover {
+    background: #f0f9ff !important;
+    color: #0369a1 !important;
+    border-color: #0284c7 !important;
+    box-shadow: 0 2px 5px rgba(2, 132, 199, 0.15) !important;
+    transform: translateY(-1px) !important;
+}
+
+/* Chatbot Window & Bubbles */
+.ai-chat-window {
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 12px !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02) !important;
+}
+
+/* Chat bubble contrast & borders */
+.ai-chat-window .message-wrap .user,
+.ai-chat-window [data-testid="user"] {
+    background-color: #f0f9ff !important;
+    border: 1px solid #bae6fd !important;
+    color: #0c4a6e !important;
+    border-radius: 12px !important;
+    padding: 12px 16px !important;
+}
+
+.ai-chat-window .message-wrap .bot,
+.ai-chat-window [data-testid="bot"] {
+    background-color: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    color: #0f172a !important;
+    border-radius: 12px !important;
+    padding: 12px 16px !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02) !important;
+}
+
+/* Inline Code & Code Block Contrast in Chat and App */
+.ai-chat-window code,
+.gradio-container code {
+    background-color: #f1f5f9 !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+    padding: 2px 6px !important;
+    border-radius: 4px !important;
+    font-family: 'JetBrains Mono', ui-monospace, monospace !important;
+    font-size: 0.88em !important;
+    font-weight: 600 !important;
+}
+
+.ai-chat-window pre,
+.gradio-container pre {
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 8px !important;
+    padding: 12px !important;
+    font-family: 'JetBrains Mono', ui-monospace, monospace !important;
+    font-size: 0.86rem !important;
+    overflow-x: auto !important;
+}
+
+/* File Upload & Input Containers */
+.gradio-container input[type="text"],
+.gradio-container textarea {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 8px !important;
+}
+
+.gradio-container input[type="text"]:focus,
+.gradio-container textarea:focus {
+    border-color: #0284c7 !important;
+    box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15) !important;
+}
+
+.gradio-container .file-preview-holder,
+.gradio-container .upload-container {
+    background: #ffffff !important;
+    border: 1px dashed #94a3b8 !important;
+    border-radius: 8px !important;
 }
 """
 

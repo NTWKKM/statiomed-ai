@@ -25,17 +25,17 @@ from logger import get_logger
 
 logger = get_logger(__name__)
 
-INITIAL_BOT_MESSAGE = """### 🏥 สวัสดีครับ! ผมคือ StatioMed AI — Clinical Biostatistical Co-Pilot
-ผมเป็นระบบผู้ช่วยปัญญาประดิษฐ์และเครื่องมือวิเคราะห์ชีวสถิติทางการแพทย์ (Zero-PHI Compliant)
+INITIAL_BOT_MESSAGE = """### 🏥 Hello! I am StatioMed AI — Clinical Biostatistical Co-Pilot
+I am an AI-driven clinical biostatistics and research methodology engine (Zero-PHI Compliant).
 
-**สิ่งที่ผมสามารถช่วยเหลือท่านได้ทันที:**
-1. **💡 เสนอแนวทางการทำวิจัย 4-5 รูปแบบจากหัวข้อกว้างๆ:** ระบุหัวข้อ เช่น *'dyspnea'*, *'sepsis'*, *'acute kidney injury'* ระบบจะดึงหลักฐานจาก **PubMed** และสังเคราะห์โจทย์วิจัย (RCT, Survival, Diagnostic, Prediction, PSM) พร้อมแผนสถิติให้เลือก
-2. **📄 อัปโหลด Research Proposal / Protocol (`.docx`, `.pdf`, `.txt`):** เพื่อให้ระบบวิเคราะห์ PICO, ตัวแปร, และเลือกสถิติที่เหมาะสมตามมาตรฐาน SAMPL & EQUATOR
-3. **📊 อัปโหลดชุดข้อมูลวิจัย (`.csv`, `.xlsx`, `.sav`, `.dta`):** เพื่อให้ระบบรันสถิติที่เหมาะสม (เช่น Table 1, Kaplan-Meier, Cox PH, Logistic Regression) ให้ทันที
-4. **🧬 สร้างข้อมูลจำลอง (Synthetic Clinical Cohort):** เพื่อทดสอบโมเดลสถิติตามโจทย์ทางคลินิก
-5. **📐 คำนวณขนาดกลุ่มตัวอย่าง (Sample Size & Statistical Power):** พร้อมข้อความสำหรับเขียนในระเบียบวิธีวิจัย
+**How I can assist your clinical investigation:**
+1. **💡 5-Direction Research Ideation:** Specify broad topics like *'dyspnea'*, *'sepsis'*, or *'acute kidney injury'*. I will synthesize recent evidence from **PubMed** and formulate 5 publication-ready study designs (RCT, Survival Cohort, Diagnostic Accuracy, Prediction Model, PSM) with statistical analysis plans.
+2. **📄 Analyze Research Proposal / Protocol (`.docx`, `.pdf`, `.txt`):** Extract PICO, study variables, and construct a SAMPL & EQUATOR compliant statistical pipeline.
+3. **📊 Ingest Clinical Research Datasets (`.csv`, `.xlsx`, `.sav`, `.dta`):** Automatically detect schemas and execute appropriate biostatistical workflows (Baseline Table 1, Kaplan-Meier, Cox PH, Logistic Regression).
+4. **🧬 Generate Synthetic Clinical Cohorts:** Instant mock datasets for hypothesis testing and model validation.
+5. **📐 Sample Size & Power Calculations:** Closed-form formulas with manuscript-ready methodology text.
 
-*พิมพ์ชื่อหัวข้อที่สนใจ (เช่น 'dyspnea') หรือคลิกปุ่มด้านล่างได้เลยครับ!*
+*Type any clinical topic of interest (e.g., 'dyspnea') or click the quick action chips below!*
 """
 
 
@@ -142,7 +142,7 @@ def chat_submit_action(
         </div>
         """
             if new_state.has_data()
-            else "<div style='color:#64748b;font-size:0.85rem;'>No dataset currently active in session.</div>"
+            else "<div style='background:#ffffff;border:1px solid #cbd5e1;border-radius:8px;padding:8px 12px;color:#475569;font-size:0.85rem;'>📁 No dataset loaded. Upload files or ask AI to generate synthetic data.</div>"
         )
 
         return (
@@ -157,7 +157,7 @@ def chat_submit_action(
 
     except Exception as e:
         logger.exception("Chat Action Error: %s", e)
-        err_msg = f"❌ เกิดข้อผิดพลาดในการประมวลผล: {html.escape(str(e))}"
+        err_msg = f"❌ Error during processing: {html.escape(str(e))}"
         chat_history.append({"role": "assistant", "content": err_msg})
         return chat_history, "", None, state, go.Figure(), state.df, ""
 
@@ -216,46 +216,46 @@ def create_ai_copilot_view(
                 # Quick Action Chips
                 with gr.Row(elem_classes=["prompt-chips-row"]):
                     btn_chip_dyspnea = gr.Button(
-                        "💡 เสนอแนวทางวิจัย: Dyspnea", size="sm", variant="secondary"
+                        "💡 Research Ideation: Dyspnea", size="sm", variant="secondary"
                     )
                     btn_chip_sepsis = gr.Button(
-                        "💡 เสนอแนวทางวิจัย: Sepsis", size="sm", variant="secondary"
+                        "💡 Research Ideation: Sepsis", size="sm", variant="secondary"
                     )
                     btn_chip_proposal = gr.Button(
-                        "📄 วิเคราะห์ Proposal & สถิติ", size="sm", variant="secondary"
+                        "📄 Analyze Proposal & Stats", size="sm", variant="secondary"
                     )
                     btn_chip_synth = gr.Button(
-                        "🧬 สร้าง Synthetic Data & รัน KM",
+                        "🧬 Synthetic Data & Kaplan-Meier",
                         size="sm",
                         variant="secondary",
                     )
                     btn_chip_sample = gr.Button(
-                        "📐 คำนวณ Sample Size (80% Power)",
+                        "📐 Sample Size (80% Power)",
                         size="sm",
                         variant="secondary",
                     )
                     btn_chip_t1 = gr.Button(
-                        "👥 สร้าง Table 1 Baseline", size="sm", variant="secondary"
+                        "👥 Generate Table 1 Baseline", size="sm", variant="secondary"
                     )
                     btn_chip_surv = gr.Button(
-                        "⏱️ รัน Survival & Cox PH", size="sm", variant="secondary"
+                        "⏱️ Run Survival & Cox PH", size="sm", variant="secondary"
                     )
 
                 # Chat Input Box + File Upload
                 with gr.Row():
                     chat_input = gr.Textbox(
-                        placeholder="💬 พิมพ์คำถาม, ระบุวัตถุประสงค์วิจัย, หรือแนบไฟล์ Proposal/Data ด้านล่าง...",
+                        placeholder="💬 Type your research question, objective, or attach proposal/dataset below...",
                         lines=2,
                         max_lines=6,
                         scale=9,
                         show_label=False,
                         container=False,
                     )
-                    btn_send = gr.Button("🚀 ส่งข้อความ", variant="primary", scale=2)
+                    btn_send = gr.Button("🚀 Send Message", variant="primary", scale=2)
 
                 with gr.Row():
                     file_uploader = gr.File(
-                        label="📎 แนบไฟล์ Proposal (.docx, .pdf, .txt) หรือ Dataset (.csv, .xlsx, .sav)",
+                        label="📎 Attach Proposal (.docx, .pdf, .txt) or Dataset (.csv, .xlsx, .sav, .dta)",
                         file_types=[
                             ".docx",
                             ".doc",
@@ -273,14 +273,14 @@ def create_ai_copilot_view(
                         scale=9,
                     )
                     btn_clear = gr.Button(
-                        "🗑️ ล้างแชท", variant="secondary", size="sm", scale=2
+                        "🗑️ Clear Chat", variant="secondary", size="sm", scale=2
                     )
 
             # Right Column: Live Visual Artifacts & Dataset Inspection
             with gr.Column(scale=5):
                 active_status_badge = gr.HTML(
                     """
-                    <div style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 8px 12px; font-size: 0.85rem; color: #64748b;">
+                    <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; font-size: 0.85rem; color: #475569; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);">
                         📁 No dataset loaded. Upload files or ask AI to generate synthetic data.
                     </div>
                     """
@@ -303,9 +303,9 @@ def create_ai_copilot_view(
                         gr.Markdown(
                             """
                             #### 🔒 Zero-PHI & SAMPL Certified Engine
-                            - **Zero Hallucination:** LLM ไม่คิดเลขเอง แต่เลือกใช้ฟังก์ชันสถิติที่ผ่านการสอบเทียบจาก `utils/` (R 4.3.3 & statsmodels benchmarked)
-                            - **Dual Ingestion:** รองรับทั้งโครงร่างงานวิจัย (Word `.docx`) และชุดข้อมูลจริง (Excel/CSV/SPSS)
-                            - **Immediate Execution:** สั่งการสถิติและพล็อตกราฟให้ทันที พร้อมส่งต่อข้อมูลไปยังแท็บอื่นในระบบแบบ Reactive State
+                            - **Zero Hallucination:** LLM selects calibrated deterministic statistical functions from `utils/` (benchmarked against R 4.3.3 & statsmodels).
+                            - **Dual Ingestion:** Supports research proposals (Word `.docx`, PDF, text) and clinical datasets (Excel, CSV, SPSS, Stata).
+                            - **Immediate Execution:** Automatically executes statistical tests and renders interactive plots with full reactive session state.
                             """
                         )
 
@@ -343,7 +343,7 @@ def create_ai_copilot_view(
             fn=handle_prompt_chip,
             inputs=[
                 gr.State(
-                    "เสนอแนวทางการทำวิจัยทางคลินิก 5 รูปแบบสำหรับหัวข้อ Dyspnea (ภาวะหายใจลำบาก) พร้อมหลักฐานจาก PubMed"
+                    "Propose 5 clinical research study designs and statistical analysis plans for acute dyspnea based on PubMed evidence"
                 ),
                 chatbot,
                 app_state,
@@ -363,7 +363,7 @@ def create_ai_copilot_view(
             fn=handle_prompt_chip,
             inputs=[
                 gr.State(
-                    "เสนอแนวทางการทำวิจัยทางคลินิก 5 รูปแบบสำหรับหัวข้อ Sepsis ในแผนกฉุกเฉิน/ICU พร้อมหลักฐานจาก PubMed"
+                    "Propose 5 clinical research study designs and statistical analysis plans for sepsis in the emergency department/ICU based on PubMed evidence"
                 ),
                 chatbot,
                 app_state,
@@ -383,7 +383,7 @@ def create_ai_copilot_view(
             fn=handle_prompt_chip,
             inputs=[
                 gr.State(
-                    "ช่วยวิเคราะห์โครงร่างงานวิจัย (Proposal) และแนะนำสถิติที่เหมาะสมสำหรับ Primary Endpoint"
+                    "Analyze this clinical research proposal and recommend appropriate statistical methodology for the primary endpoint"
                 ),
                 chatbot,
                 app_state,
@@ -403,7 +403,7 @@ def create_ai_copilot_view(
             fn=handle_prompt_chip,
             inputs=[
                 gr.State(
-                    "สร้าง Synthetic Data การทดลองทางคลินิก SGLT2 inhibitor vs Placebo แล้วรัน Kaplan-Meier survival analysis ให้ดูทันที"
+                    "Generate a synthetic clinical trial dataset comparing SGLT2 inhibitor vs Placebo and execute Kaplan-Meier survival analysis"
                 ),
                 chatbot,
                 app_state,
@@ -423,7 +423,7 @@ def create_ai_copilot_view(
             fn=handle_prompt_chip,
             inputs=[
                 gr.State(
-                    "คำนวณ sample size สำหรับ RCT เปรียบเทียบ 2 กลุ่ม Event rate 30% vs 15% Power 80% Alpha 0.05"
+                    "Calculate sample size for an RCT comparing two groups with 30% vs 15% event rates, 80% power, alpha 0.05"
                 ),
                 chatbot,
                 app_state,
@@ -443,7 +443,7 @@ def create_ai_copilot_view(
             fn=handle_prompt_chip,
             inputs=[
                 gr.State(
-                    "สร้าง Table 1 Baseline characteristics พร้อมคำนวณ Standardized Mean Differences (SMD)"
+                    "Generate a baseline characteristics Table 1 with Standardized Mean Differences (SMD)"
                 ),
                 chatbot,
                 app_state,
@@ -463,7 +463,7 @@ def create_ai_copilot_view(
             fn=handle_prompt_chip,
             inputs=[
                 gr.State(
-                    "รัน Kaplan-Meier survival curves และ Multivariable Cox Proportional Hazards model ปรับตัวแปรกวน"
+                    "Execute Kaplan-Meier survival analysis and multivariable Cox Proportional Hazards model adjusting for confounders"
                 ),
                 chatbot,
                 app_state,

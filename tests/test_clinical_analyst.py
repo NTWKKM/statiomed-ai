@@ -210,7 +210,7 @@ def test_clinical_analyst_turn_sample_size():
         file_paths=None,
         state=state,
     )
-    assert "ผลการคำนวณขนาดกลุ่มตัวอย่าง" in response_md
+    assert "Sample Size" in response_md
     assert "Fleiss" in response_md
     assert "35" in response_md and "%" in response_md
     assert "18" in response_md and "%" in response_md

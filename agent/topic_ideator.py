@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+from agent.agent_runner import ClinicalAgentRunner
 from agent.tools.tool_pubmed import PubMedEvidenceTool
 from logger import get_logger
 
@@ -43,7 +44,7 @@ class ClinicalTopicIdeator:
     from any broad clinical keyword or medical condition.
     """
 
-    # Keyword normalization dictionary (Thai -> English medical terms)
+    # Keyword normalization dictionary (Thai / Keywords -> English medical terms)
     TOPIC_SYNONYMS: ClassVar[dict[str, str]] = {
         "dyspnea": "acute dyspnea heart failure COPD",
         "เหนื่อย": "acute dyspnea heart failure COPD",
@@ -66,10 +67,61 @@ class ClinicalTopicIdeator:
         "อุบัติเหตุ": "trauma hemorrhagic shock resuscitation",
         "diabetic ketoacidosis": "diabetic ketoacidosis fluid protocol insulin",
         "dka": "diabetic ketoacidosis fluid protocol insulin",
+        "triage": "emergency department triage screening acuity ESI",
+        "คัดกรอง": "emergency department triage screening acuity ESI",
+        "er": "emergency department triage acute care resuscitation",
+        "ห้องฉุกเฉิน": "emergency department triage acute care resuscitation",
+        "ฉุกเฉิน": "emergency department triage acute care resuscitation",
+        "icu": "intensive care unit critical care sepsis organ failure",
+        "ไอซียู": "intensive care unit critical care sepsis organ failure",
+        "cpr": "cardiopulmonary resuscitation cardiac arrest ROSC",
+        "กู้ชีพ": "cardiopulmonary resuscitation cardiac arrest ROSC",
+        "shock": "septic shock cardiogenic shock hemodynamic resuscitation",
+        "ช็อก": "septic shock cardiogenic shock hemodynamic resuscitation",
+    }
+
+    TOPIC_ENGLISH_TITLES: ClassVar[dict[str, str]] = {
+        "เหนื่อย": "Acute Dyspnea",
+        "หอบ": "Acute Dyspnea & COPD Exacerbation",
+        "ติดเชื้อ": "Sepsis & Severe Infection",
+        "หัวใจหยุดเต้น": "Out-of-Hospital Cardiac Arrest",
+        "เจ็บหน้าอก": "Acute Chest Pain & ACS",
+        "หลอดเลือดสมอง": "Acute Ischemic Stroke",
+        "ไตวาย": "Acute Kidney Injury (AKI)",
+        "ปอดอักเสบ": "Community-Acquired Pneumonia",
+        "หัวใจวาย": "Acute Decompensated Heart Failure",
+        "อุบัติเหตุ": "Major Trauma & Hemorrhagic Shock",
+        "คัดกรอง": "Emergency Department Triage & Screening",
+        "triage": "Emergency Department Triage & Screening",
+        "ห้องฉุกเฉิน": "Emergency Department Acute Care",
+        "ฉุกเฉิน": "Emergency Department Acute Care",
+        "ไอซียู": "Critical Care & ICU Transfer",
+        "กู้ชีพ": "Cardiopulmonary Resuscitation (CPR)",
+        "ช็อก": "Septic & Hemodynamic Shock",
     }
 
     _pubmed_tool: ClassVar[PubMedEvidenceTool] = PubMedEvidenceTool()
     _pubmed_cache: ClassVar[dict[str, list[dict[str, Any]]]] = {}
+
+    @classmethod
+    def clean_topic_title(cls, query: str) -> str:
+        """Resolves natural language or Thai queries into publication-grade English topic titles."""
+        lower_q = query.lower().strip()
+        for k, v in cls.TOPIC_ENGLISH_TITLES.items():
+            if k in lower_q:
+                return v
+
+        # If pure English or already clean
+        if not re.search(r"[\u0E00-\u0E7F]", query):
+            # Clean common filler prefixes
+            clean_str = re.sub(
+                r"(?i)^(i want to study|research about|study on|investigate|effect of)\s*",
+                "",
+                query,
+            ).strip()
+            return clean_str.title() if clean_str else "Clinical Acute Care"
+
+        return "Clinical Acute Care & Emergency Management"
 
     @classmethod
     def normalize_query(cls, query: str) -> str:
@@ -78,6 +130,13 @@ class ClinicalTopicIdeator:
         for k, v in cls.TOPIC_SYNONYMS.items():
             if k in lower_q:
                 return v
+
+        # Use LLM term extraction if token is available
+        if ClinicalAgentRunner.is_llm_available():
+            llm_terms = ClinicalAgentRunner.extract_biomedical_search_terms(query)
+            if llm_terms and len(llm_terms) > 3:
+                return llm_terms
+
         # Default cleaning
         cleaned = re.sub(r"[^\w\s]", "", query)
         return cleaned or "emergency medicine clinical trial"
@@ -102,7 +161,7 @@ class ClinicalTopicIdeator:
             except Exception as e:
                 logger.warning(f"PubMed search error: {e}")
 
-        topic_clean = clinical_topic.strip().title()
+        topic_clean = cls.clean_topic_title(clinical_topic)
 
         # Build 5 Methodologically Diverse Clinical Proposals
         options = [
@@ -225,7 +284,7 @@ class ClinicalTopicIdeator:
             lines = []
             for a in articles:
                 lines.append(f"- **{a['title']}**  \n  *{a['vancouver_citation']}*")
-            pubmed_section = f"""#### 📚 หลักฐานเชิงประจักษ์ล่าสุดจาก PubMed (Recent Benchmark Evidence):
+            pubmed_section = f"""#### 📚 Recent Benchmark Evidence from PubMed:
 {chr(10).join(lines)}
 
 ---
@@ -234,33 +293,33 @@ class ClinicalTopicIdeator:
         proposals_cards = []
         for opt in options:
             stats_bullets = "\n".join([f"    - ✔️ {s}" for s in opt.recommended_stats])
-            card = f"""### 📌 แนวทางที่ {opt.option_id}: {opt.title}
+            card = f"""### 📌 Option {opt.option_id}: {opt.title}
 <span style='background:#e0f2fe;color:#0369a1;padding:2px 8px;border-radius:6px;font-size:0.8rem;font-weight:600;'>{opt.design_badge}</span>
 
-- **🎯 วัตถุประสงค์และเหตุผลทางคลินิก:** {opt.clinical_rationale}
-- **👥 ประชากรศึกษา (Population):** {opt.population}
-- **💊 สิ่งแทรกแซง/ปัจจัยเสี่ยง (Intervention/Exposure):** {opt.intervention_exposure}
-- **⚖️ กลุ่มเปรียบเทียบ (Comparator):** {opt.comparator}
-- **🎯 ผลลัพธ์หลัก (Primary Endpoint):** `{opt.primary_outcome}`
-- **📐 ระเบียบวิธีวิจัยและสถิติที่แนะนำ (Statistical Plan):**
+- **🎯 Clinical Rationale & Objective:** {opt.clinical_rationale}
+- **👥 Target Population (P):** {opt.population}
+- **💊 Intervention / Exposure (I):** {opt.intervention_exposure}
+- **⚖️ Comparator (C):** {opt.comparator}
+- **🎯 Primary Endpoint (O):** `{opt.primary_outcome}`
+- **📐 Recommended Statistical Plan:**
 {stats_bullets}
-- **📊 ประมาณการขนาดกลุ่มตัวอย่าง (Sample Size Target):** `{opt.sample_size_estimate}`
+- **📊 Estimated Sample Size:** `{opt.sample_size_estimate}`
 """
             proposals_cards.append(card)
 
         all_cards_md = "\n\n".join(proposals_cards)
 
-        full_md = f"""### 💡 ข้อเสนอแนวทางการทำวิจัยและสถิติ 5 รูปแบบสำหรับ: **"{topic_title}"**
+        full_md = f"""### 💡 5 Clinical Study Designs & Statistical Analysis Plans: **"{topic_title}"**
 
 {pubmed_section}
 {all_cards_md}
 
 ---
 
-### 🚀 เลือกดำเนินการวิเคราะห์สถิติทันที (Immediate Interactive Action):
-ท่านสามารถพิมพ์เลือกแนวทางที่ต้องการได้เลยครับ เช่น:
-- พิมพ์ **`"เลือกข้อ 2 สร้าง synthetic data แล้วรัน survival ให้ดู"`** ➔ *Agent จะสร้างข้อมูลจำลองและฟิตกราฟ Kaplan-Meier & Cox PH ให้ทันที*
-- พิมพ์ **`"คำนวณ sample size ของข้อ 1"`** ➔ *Agent จะคำนวณขนาดตัวอย่างพร้อมสูตร SAMPL*
-- พิมพ์ **`"ทำ Table 1 ของข้อ 5"`** ➔ *Agent จะสร้าง Baseline Table 1 พร้อมคำนวณ SMD*
+### 🚀 Immediate Interactive Action:
+You can type or select any direction to execute immediately, for example:
+- Type **`"Option 2: generate synthetic data and run survival analysis"`** ➔ *Agent will synthesize a clinical cohort and fit Kaplan-Meier & Cox PH models.*
+- Type **`"Calculate sample size for Option 1"`** ➔ *Agent will calculate power & sample size with SAMPL justification text.*
+- Type **`"Generate Table 1 for Option 5"`** ➔ *Agent will build a baseline characteristics Table 1 with SMD.*
 """
         return full_md

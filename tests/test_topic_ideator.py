@@ -45,10 +45,10 @@ def test_format_proposals_markdown():
         "dyspnea"
     )
     md = ClinicalTopicIdeator.format_proposals_markdown("dyspnea", options, articles)
-    assert "ข้อเสนอแนวทางการทำวิจัย" in md
-    assert "แนวทางที่ 1" in md
-    assert "แนวทางที่ 5" in md
-    assert "PICO" in md or "ประชากรศึกษา" in md
+    assert "Clinical Study Designs" in md
+    assert "Option 1" in md
+    assert "Option 5" in md
+    assert "PICO" in md or "Target Population" in md
 
 
 def test_clinical_analyst_turn_dyspnea_ideation():
@@ -59,9 +59,9 @@ def test_clinical_analyst_turn_dyspnea_ideation():
         file_paths=None,
         state=state,
     )
-    assert "ข้อเสนอแนวทางการทำวิจัย" in resp_md
-    assert "แนวทางที่ 1" in resp_md
-    assert "แนวทางที่ 2" in resp_md
+    assert "Clinical Study Designs" in resp_md
+    assert "Option 1" in resp_md
+    assert "Option 2" in resp_md
 
 
 def test_clinical_analyst_turn_select_option_1():

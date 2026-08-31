@@ -20,6 +20,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import scipy.stats as stats
 
+from agent.agent_runner import ClinicalAgentRunner
 from agent.tools.tool_pubmed import PubMedEvidenceTool
 from agent.tools.tool_sample_size import SampleSizeTool
 from agent.tools.tool_synthetic_data import SyntheticDataTool
@@ -894,20 +895,20 @@ class ClinicalAnalystEngine:
                     treatment_col=t_col,
                     outcome_col=o_col,
                 )
-                response_md = f"""### 🚀 ดำเนินการวิเคราะห์แนวทางที่ {opt_id} (Randomized Controlled Trial - CONSORT 2010)
+                response_md = f"""### 🚀 Executing Option {opt_id} (Randomized Controlled Trial - CONSORT 2010)
 
-**สร้างชุดข้อมูลจำลองตามแนวทางที่ {opt_id}:** `{state.file_name}` (n = {len(df_gen):,} ราย)
-- **Treatment Arm:** `{t_col}` (Control: `{metrics["n_control"]}` ราย vs Intervention: `{metrics["n_intervention"]}` ราย)
+**Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} patients)
+- **Treatment Arm:** `{t_col}` (Control: `{metrics["n_control"]}` vs Intervention: `{metrics["n_intervention"]}`)
 - **Primary Endpoint:** `{o_col}` (Binary Event)
 
-#### 1. ผลการเปรียบเทียบผลลัพธ์หลัก (Primary Outcome Comparison & Effect Sizes):
+#### 1. Primary Endpoint Comparison & Effect Sizes:
 - **Control Event Rate:** `{metrics["events_control"]}/{metrics["n_control"]}` (**`{metrics["p_control"]:.1%}`**)
 - **Intervention Event Rate:** `{metrics["events_intervention"]}/{metrics["n_intervention"]}` (**`{metrics["p_intervention"]:.1%}`**)
 - **Relative Risk (RR):** **`{metrics["relative_risk"]:.3f}`** (95% CI `{metrics["relative_risk_ci"][0]:.3f}` to `{metrics["relative_risk_ci"][1]:.3f}`)
 - **Absolute Risk Difference (RD):** **`{metrics["risk_diff"]:+.1%}`** (95% CI `{metrics["risk_diff_ci"][0]:+.1%}` to `{metrics["risk_diff_ci"][1]:+.1%}`)
-- **Number Needed to Treat (NNT):** **`{metrics["nnt"]:.1f}`** ราย | **Relative Risk Reduction (RRR):** `{metrics["relative_risk_reduction"]:.1f}%`
+- **Number Needed to Treat (NNT):** **`{metrics["nnt"]:.1f}`** patients | **Relative Risk Reduction (RRR):** `{metrics["relative_risk_reduction"]:.1f}%`
 
-#### 2. การทดสอบสมมติฐานทางสถิติ (Hypothesis Testing):
+#### 2. Hypothesis Testing & Significance:
 - **Chi-Square Test (with Yates correction):** $\\chi^2$ = `{metrics["chi2_stat"]:.3f}` (P-value = **`{metrics["chi2_p"]:.4f}`**)
 - **Fisher's Exact Test:** P-value = **`{metrics["fisher_p"]:.4f}`** (Odds Ratio = `{metrics["fisher_or"]:.3f}`)
 
@@ -928,18 +929,18 @@ class ClinicalAnalystEngine:
                     if isinstance(km_p_val, (int, float))
                     else str(km_p_val)
                 )
-                response_md = f"""### 🚀 ดำเนินการวิเคราะห์แนวทางที่ {opt_id} (Kaplan-Meier & Cox Proportional Hazards - STROBE)
+                response_md = f"""### 🚀 Executing Option {opt_id} (Kaplan-Meier & Cox Proportional Hazards - STROBE)
 
-**สร้างชุดข้อมูลจำลองตามแนวทางที่ {opt_id}:** `{state.file_name}` (n = {len(df_gen):,} ราย)
+**Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} patients)
 
 #### 1. Kaplan-Meier Survival Analysis & Log-Rank Test:
 - **Duration / Time:** `{time_col}` | **Event / Status:** `{event_col}`
 - **Log-Rank P-value:** `{km_p_val_str}`
-- **เหตุการณ์ที่เกิดขึ้นทั้งหมด (Events):** `{df_gen[event_col].sum() if event_col in df_gen.columns else "N/A"}` จาก `{len(df_gen)}` ราย
+- **Total Observed Events:** `{df_gen[event_col].sum() if event_col in df_gen.columns else "N/A"}` out of `{len(df_gen)}` subjects
 
 #### 2. Multivariable Cox Proportional Hazards Model:
 - **Confounders Adjusted:** {", ".join([f"`{c}`" for c in covars]) if covars else "None"}
-- **สถานะ:** ข้อมูลถูกบันทึกเข้า session และเรนเดอร์กราฟในหน้าต่าง Visual Output เรียบร้อยแล้วครับ
+- **Status:** Cohort saved to session state and Kaplan-Meier plot rendered in the Visual Output panel.
 """
                 return response_md, state, fig, df_gen
             elif opt_id == 3:
@@ -985,14 +986,14 @@ class ClinicalAnalystEngine:
                     if metrics.get("used_example_counts")
                     else "2x2 Matrix Counts (Derived from Cohort)"
                 )
-                response_md = f"""### 🚀 ดำเนินการวิเคราะห์แนวทางที่ {opt_id} (Diagnostic Accuracy & Fagan Nomogram - STARD 2015)
+                response_md = f"""### 🚀 Executing Option {opt_id} (Diagnostic Accuracy & Fagan Nomogram - STARD 2015)
 
-**สร้างชุดข้อมูลจำลองตามแนวทางที่ {opt_id}:** `{state.file_name}` (n = {len(df_gen):,} ราย)
+**Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} subjects)
 - **Index Diagnostic Test:** `{idx_col}` | **Reference Standard:** `{ref_col}`
 - **{matrix_label}:** TP = `{metrics["tp"]}`, FP = `{metrics["fp"]}`, FN = `{metrics["fn"]}`, TN = `{metrics["tn"]}`
 
-#### 1. ผลการประเมินความแม่นยำในการวินิจฉัย (Diagnostic Performance Metrics):
-- **Sensitivity (ความไว):** `{metrics["sensitivity"]:.1%}` | **Specificity (ความจำเพาะ):** `{metrics["specificity"]:.1%}`
+#### 1. Diagnostic Performance Metrics:
+- **Sensitivity:** `{metrics["sensitivity"]:.1%}` | **Specificity:** `{metrics["specificity"]:.1%}`
 - **Positive Likelihood Ratio (LR+):** `{metrics["lr_pos"]:.2f}` | **Negative Likelihood Ratio (LR-):** `{metrics["lr_neg"]:.2f}`
 - **Diagnostic Odds Ratio (DOR):** `{metrics["dor"]:.2f}`
 
@@ -1012,10 +1013,10 @@ class ClinicalAnalystEngine:
                     outcome_col=o_col,
                     predictor_cols=p_cols,
                 )
-                response_md = f"""### 🚀 ดำเนินการวิเคราะห์แนวทางที่ {opt_id} (Clinical Prediction Model - TRIPOD+AI)
+                response_md = f"""### 🚀 Executing Option {opt_id} (Clinical Prediction Model - TRIPOD+AI)
 
-**ชุดข้อมูล:** `{state.file_name}` (n = {len(df_gen):,} ราย)  
-**ตัวแปรตาม (Primary Outcome):** `{o_col}` (Binary Event)  
+**Dataset:** `{state.file_name}` (n = {len(df_gen):,} records)  
+**Dependent Outcome:** `{o_col}` (Binary Event)  
 **McFadden Pseudo-$R^2$:** `{metrics.get("mcfadden", 0.0):.4f}` | **AIC:** `{metrics.get("aic", 0.0):.1f}`
 
 #### Odds Ratios & Multivariable Model Summary:
@@ -1047,22 +1048,22 @@ class ClinicalAnalystEngine:
                     and not stats_dict["matched_coef_df"].empty
                 ):
                     matched_reg_md = f"""
-#### 3. ผลการวิเคราะห์ในกลุ่มประชากรที่จับคู่แล้ว (Matched Cohort Analysis):
+#### 3. Matched Cohort Analysis:
 {stats_dict["matched_coef_df"].to_markdown(index=False)}
 """
 
-                response_md = f"""### 🚀 ดำเนินการวิเคราะห์แนวทางที่ {opt_id} (Propensity Score Matching & Causal Inference)
+                response_md = f"""### 🚀 Executing Option {opt_id} (Propensity Score Matching & Causal Inference)
 
-**สร้างชุดข้อมูลจำลองตามแนวทางที่ {opt_id}:** `{state.file_name}` (n = {len(df_gen):,} ราย)
+**Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} records)
 - **Treatment Exposure:** `{t_col}` | **Outcome:** `{o_col}`
 - **Covariates Adjusted in PS Model:** {", ".join([f"`{c}`" for c in psm_covars])}
 
-#### 1. ผลการจับคู่กลุ่มตัวอย่าง (1:1 Nearest-Neighbor Matching, Caliper 0.20 SD):
-- **Original Cohort:** `{stats_dict["n_original"]}` ราย
-- **Matched Balanced Cohort:** **`{stats_dict["n_matched"]}` ราย** ({stats_dict["n_treated_matched"]} คู่)
-- **สถานะ:** ชุดข้อมูลที่จับคู่แล้วถูกบันทึกเข้า session (`AppState.df_matched`) เรียบร้อยแล้ว
+#### 1. Matching Results (1:1 Nearest-Neighbor, Caliper 0.20 SD):
+- **Original Cohort:** `{stats_dict["n_original"]}` subjects
+- **Matched Balanced Cohort:** **`{stats_dict["n_matched"]}` subjects** ({stats_dict["n_treated_matched"]} pairs)
+- **Status:** Balanced cohort saved to session (`AppState.df_matched`).
 
-#### 2. การประเมินความสมดุลของตัวแปรกวน (Covariate Balance - Love Plot & SMD):
+#### 2. Covariate Balance Assessment (Love Plot & SMD):
 {balance_df.to_markdown(index=False) if not balance_df.empty else "No covariate balance table available."}
 {matched_reg_md}
 """
@@ -1071,21 +1072,21 @@ class ClinicalAnalystEngine:
                 html_table, df_sub = StatHarness.run_table_one(
                     df_gen, group_col=treat_col
                 )
-                response_md = f"""### 🚀 ดำเนินการสร้างชุดข้อมูลตามแนวทางที่ {opt_id} (Baseline Characteristics & Table 1)
+                response_md = f"""### 🚀 Executing Option {opt_id} (Baseline Characteristics & Table 1)
 
-**สร้างชุดข้อมูลจำลองตามแนวทางที่ {opt_id}:** `{state.file_name}` (n = {len(df_gen):,} ราย)
+**Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} subjects)
 
-ชุดข้อมูลถูกบันทึกเข้า session เรียบร้อยแล้ว พร้อมสำหรับการวิเคราะห์ขั้นต่อไปครับ
+Dataset saved to session and ready for downstream analysis.
 """
                 return response_md, state, fig, df_gen
 
-        # Case B: Broad Topic Ideation & PubMed Evidence Search (e.g. "dyspnea", "sepsis", "เสนอแนวทางวิจัย", "หัวข้อวิจัย")
+        # Case B: Broad Topic Ideation & PubMed Evidence Search (e.g. "dyspnea", "sepsis", "triage", "คัดกรอง", "เสนอแนวทางวิจัย", "หัวข้อวิจัย")
         is_topic_query = (
             not state.has_data()
             and not file_paths
             and not proposal_meta
             and (
-                len(user_msg.split()) <= 8
+                len(user_msg.split()) <= 12
                 or any(
                     k in lower_msg
                     for k in [
@@ -1098,6 +1099,9 @@ class ClinicalAnalystEngine:
                         "pneumonia",
                         "asthma",
                         "copd",
+                        "triage",
+                        "screening",
+                        "emergency",
                         "เหนื่อย",
                         "หอบ",
                         "หัวข้อวิจัย",
@@ -1109,6 +1113,10 @@ class ClinicalAnalystEngine:
                         "topic",
                         "เจ็บหน้าอก",
                         "ติดเชื้อ",
+                        "คัดกรอง",
+                        "ฉุกเฉิน",
+                        "ห้องฉุกเฉิน",
+                        "er",
                     ]
                 )
             )
@@ -1117,7 +1125,10 @@ class ClinicalAnalystEngine:
                 for k in [
                     "sample size",
                     "table 1",
-                    "synthetic data",
+                    "synthetic",
+                    "cohort",
+                    "จำลอง",
+                    "สร้าง",
                     "คำนวณ",
                     "สร้างข้อมูล",
                 ]
@@ -1128,6 +1139,15 @@ class ClinicalAnalystEngine:
             options, articles, norm_q = (
                 ClinicalTopicIdeator.generate_research_directions(user_msg)
             )
+
+            # If LLM is available, synthesize tailored clinical proposals
+            if ClinicalAgentRunner.is_llm_available():
+                llm_synth = ClinicalAgentRunner.synthesize_proposals_with_llm(
+                    user_msg, articles
+                )
+                if llm_synth:
+                    return llm_synth, state, None, None
+
             response_md = ClinicalTopicIdeator.format_proposals_markdown(
                 user_msg, options, articles
             )
@@ -1177,9 +1197,9 @@ class ClinicalAnalystEngine:
             )
 
             pico = meta.get("pico", {})
-            response_md = f"""### 🧬 สร้างชุดข้อมูลจำลองทางการแพทย์สำเร็จ (Synthetic Clinical Cohort Active)
+            response_md = f"""### 🧬 Synthetic Clinical Cohort Generated Successfully
 
-**ชุดข้อมูล:** `{state.file_name}` (n = {len(df_gen):,} records, {len(df_gen.columns)} ตัวแปร)
+**Dataset:** `{state.file_name}` (n = {len(df_gen):,} records, {len(df_gen.columns)} variables)
 
 #### 📋 PICO Framework:
 - **👥 Population (P):** {pico.get("population", "Adult clinical cohort")}
@@ -1189,11 +1209,11 @@ class ClinicalAnalystEngine:
 
 ---
 
-#### 🚀 ดำเนินการวิเคราะห์สถิติทันที (Immediate Statistical Execution):
-1. **Kaplan-Meier Survival Analysis:** Fit เส้นรอดชีพตามกลุ่มการรักษา (`{treat_col}`)
+#### 🚀 Immediate Statistical Execution:
+1. **Kaplan-Meier Survival Analysis:** Fit survival curves stratified by treatment arm (`{treat_col}`)
    - **Log-Rank Test P-value:** `{km_p_val_str}`
-   - **Total Events:** `{df_gen[event_col].sum() if event_col else "N/A"}` เหตุการณ์
-2. **ข้อมูลถูกซิงค์เข้า Session เรียบร้อย:** ท่านสามารถสลับไปแท็บ **📊 Data Profiler**, **📈 Regression**, หรือ **👥 Table 1 & Matching** เพื่อดูรายละเอียดเพิ่มเติมได้ทันทีครับ
+   - **Total Events:** `{df_gen[event_col].sum() if event_col else "N/A"}` events
+2. **Session State Synced:** You can now switch to **📊 Data Profiler**, **📈 Regression**, or **👥 Table 1 & Matching** tabs for further in-depth analysis.
 """
             return response_md, state, fig, df_gen
 
@@ -1220,24 +1240,24 @@ class ClinicalAnalystEngine:
             res = StatHarness.run_sample_size(
                 p1=p1, p2=p2, power=power, alpha=alpha, dropout_rate=0.15
             )
-            response_md = f"""### 📐 ผลการคำนวณขนาดกลุ่มตัวอย่าง (Sample Size & Power Calculation)
+            response_md = f"""### 📐 Sample Size & Statistical Power Calculation
 
-**สูตรมาตรฐาน:** Fleiss formula with Continuity Correction (SAMPL Compliant)
+**Standard Formula:** Fleiss formula with Continuity Correction (SAMPL Compliant)
 
-| พารามิเตอร์ (Parameter) | ค่าที่กำหนด (Value) |
+| Parameter | Assigned Value |
 | :--- | :--- |
-| **Exposure / Control Event Rate ($p_1$)** | `{res["p1_control"]:.1%}` |
-| **Intervention / Experimental Event Rate ($p_2$)** | `{res["p2_intervention"]:.1%}` |
+| **Control Group Event Rate ($p_1$)** | `{res["p1_control"]:.1%}` |
+| **Intervention Group Event Rate ($p_2$)** | `{res["p2_intervention"]:.1%}` |
 | **Type I Error ($\\alpha$, 2-sided)** | `{alpha}` (95% Confidence Level) |
 | **Statistical Power ($1 - \\beta$)** | `{power:.0%}` |
-| **Expected Drop-out Rate** | `15.0%` |
+| **Anticipated Drop-out Rate** | `15.0%` |
 
-#### 🎯 ขนาดกลุ่มตัวอย่างที่ต้องการ (Target Sample Size):
-- **กลุ่มควบคุม (Control Group):** `{res["n_control_adjusted"]}` ราย
-- **กลุ่มทดลอง (Intervention Group):** `{res["n_intervention_adjusted"]}` ราย
-- **จำนวนผู้ป่วยรวมทั้งสิ้น (Total Target):** **`{res["n_total_adjusted"]}` ราย**
+#### 🎯 Target Sample Size:
+- **Control Group:** `{res["n_control_adjusted"]}` subjects
+- **Intervention Group:** `{res["n_intervention_adjusted"]}` subjects
+- **Total Required Enrollment:** **`{res["n_total_adjusted"]}` patients**
 
-> 💡 **ข้อความสำหรับระเบียบวิธีวิจัย (Methodology Justification):**  
+> 💡 **Methodology Justification Text:**  
 > *"{res["justification_text"]}"*
 """
             return response_md, state, None, state.df
@@ -1290,13 +1310,13 @@ class ClinicalAnalystEngine:
 
                     dataset_exec_section = f"""
 ---
-### 🚀 ดำเนินการวิเคราะห์สถิติตามชุดข้อมูลที่เชื่อมโยงทันที (Execution on Active Data):
-- **ชุดข้อมูล:** `{state.file_name}` (n = {len(df):,} records)
-- **ตัวแปรที่ตรวจจับ:** Time = `{time_col}`, Event = `{event_col}`, Group = `{treat_col or "Overall"}`
-- **ผลการทดสอบ Kaplan-Meier & Log-Rank Test:** P-value = **`{p_val_str}`**
-- **ผล Cox Multivariable Proportional Hazards:** ปรับตัวแปรกวน ({covar_str}) เรียบร้อยแล้ว
+### 🚀 Execution on Active Session Dataset:
+- **Dataset:** `{state.file_name}` (n = {len(df):,} records)
+- **Detected Variables:** Time = `{time_col}`, Event = `{event_col}`, Group = `{treat_col or "Overall"}`
+- **Kaplan-Meier & Log-Rank Test:** P-value = **`{p_val_str}`**
+- **Multivariable Cox Model:** Adjusted for confounders ({covar_str})
 
-*(แสดงกราฟ Kaplan-Meier Survival Function ในหน้าต่าง Visual Artifact ด้านขวา)*
+*(Kaplan-Meier Survival Function is displayed in the Visual Output panel on the right)*
 """
                 elif event_col and treat_col:
                     coef_df, metrics, fig = StatHarness.run_logistic(
@@ -1306,9 +1326,9 @@ class ClinicalAnalystEngine:
                     )
                     dataset_exec_section = f"""
 ---
-### 🚀 ดำเนินการวิเคราะห์ Multivariable Logistic Regression ทันที:
-- **ชุดข้อมูล:** `{state.file_name}` (n = {len(df):,} records)
-- **ตัวแปรตาม (Binary Outcome):** `{event_col}`
+### 🚀 Multivariable Logistic Regression Execution:
+- **Dataset:** `{state.file_name}` (n = {len(df):,} records)
+- **Primary Binary Outcome:** `{event_col}`
 - **Pseudo $R^2$ (McFadden):** `{metrics.get("mcfadden", 0.0):.4f}` | **AIC:** `{metrics.get("aic", 0.0):.1f}`
 """
             else:
@@ -1317,26 +1337,26 @@ class ClinicalAnalystEngine:
                 )
                 dataset_exec_section = f"""
 ---
-### 📐 การวางแผนขนาดตัวอย่างเบื้องต้น (Initial Sample Size Justification):
-- **เป้าหมายความต่าง (Effect Size):** $p_1 = 30.0\\%$ vs $p_2 = 18.0\\%$ ($\\Delta = 12.0\\%$)
-- **จำนวนกลุ่มตัวอย่างแนะนำ (รวม 15% Drop-out):** **`{sample_calc["n_total_adjusted"]}` ราย** (`{sample_calc["n_control_adjusted"]}` ต่อกลุ่ม)
+### 📐 Initial Sample Size Planning:
+- **Target Effect Size:** $p_1 = 30.0\\%$ vs $p_2 = 18.0\\%$ ($\\Delta = 12.0\\%$)
+- **Recommended Sample Size (with 15% Drop-out):** **`{sample_calc["n_total_adjusted"]}` subjects** (`{sample_calc["n_control_adjusted"]}` per arm)
 
-💡 *ต้องการให้ Agent สร้างชุดข้อมูลจำลอง (Synthetic Clinical Cohort) ตามโครงสร้าง Proposal นี้เพื่อทดสอบสถิติทันทีหรือไม่? พิมพ์ว่า "สร้าง synthetic data"*
+💡 *Would you like to generate a Synthetic Clinical Cohort matching this proposal to test the statistical pipeline? Type "generate synthetic data".*
 """
 
-            response_md = f"""### 📄 ผลการวิเคราะห์โครงร่างงานวิจัย (Research Proposal & Protocol Analysis)
+            response_md = f"""### 📄 Research Proposal & Protocol Analysis
 
-**หัวข้องานวิจัย:** `{proposal_meta.title}`  
-**รูปแบบการศึกษา (Study Design):** **{proposal_meta.study_design}**
+**Study Title:** `{proposal_meta.title}`  
+**Study Design:** **{proposal_meta.study_design}**
 
 #### 📋 PICO Framework:
 - **👥 Population (P):** {proposal_meta.population}
 - **💊 Intervention / Exposure (I):** {proposal_meta.intervention_exposure}
 - **⚖️ Comparator (C):** {proposal_meta.comparator}
 - **🎯 Primary Outcome (O):** {proposal_meta.primary_outcome}
-- **📊 ตัวแปรที่ตรวจพบ (Variables):** {var_list}
+- **📊 Detected Variables:** {var_list}
 
-#### 📐 สถิติที่เหมาะสมและแนะนำตามหลักระเบียบวิธีวิจัย (Recommended Statistical Pipeline):
+#### 📐 Recommended Statistical Pipeline (SAMPL & EQUATOR Compliant):
 {recs_list}
 {dataset_exec_section}
 """
@@ -1373,7 +1393,7 @@ class ClinicalAnalystEngine:
             ):
                 if not time_col or not event_col:
                     return (
-                        "⚠️ ไม่พบตัวแปร Time หรือ Event ในชุดข้อมูล กรุณาระบุชื่อคอลัมน์",
+                        "⚠️ Time or Event variable not detected in dataset. Please specify column names.",
                         state,
                         None,
                         df,
@@ -1392,20 +1412,20 @@ class ClinicalAnalystEngine:
                     "Concordance Index (C-index)", "N/A"
                 )
 
-                response_md = f"""### ⏱️ ผลการวิเคราะห์การรอดชีพ (Survival Analysis Execution)
+                response_md = f"""### ⏱️ Survival Analysis Execution
 
-**ชุดข้อมูล:** `{state.file_name}` (n = {len(df):,})  
-**ตัวแปร:** Duration = `{time_col}`, Event = `{event_col}`, Group = `{treat_col or "None"}`
+**Dataset:** `{state.file_name}` (n = {len(df):,})  
+**Variables:** Duration = `{time_col}`, Event = `{event_col}`, Group = `{treat_col or "None"}`
 
 #### 1. Kaplan-Meier & Log-Rank Test:
 - **Log-Rank P-value:** **`{p_val_str}`**
-- **Total Events:** `{df[event_col].sum()}` จากทั้งหมด `{len(df)}` ราย
+- **Total Events:** `{df[event_col].sum()}` out of `{len(df)}` subjects
 
 #### 2. Multivariable Cox Proportional Hazards Model:
 - **Concordance Index (C-index):** `{c_idx}`
 - **Covariates Adjusted:** {covar_str}
 
-*(เส้นกราฟ Kaplan-Meier Survival Function ถูกเรนเดอร์ในหน้าต่าง Visual Output เรียบร้อยแล้ว)*
+*(Kaplan-Meier Survival Function has been rendered in the Visual Output window)*
 """
                 return response_md, state, fig, df
 
@@ -1417,10 +1437,10 @@ class ClinicalAnalystEngine:
                 html_t1, df_t1 = StatHarness.run_table_one(
                     df, group_col=treat_col, selected_vars=cols[:8]
                 )
-                response_md = f"""### 👥 ตารางลักษณะพื้นฐานประชากร (Baseline Table 1)
+                response_md = f"""### 👥 Baseline Characteristics (Table 1)
 
-**จำแนกตามกลุ่ม (Stratified by):** `{treat_col or "Overall"}`  
-**คำนวณความต่าง:** Standardized Mean Differences (SMD cutoff < 0.10 บ่งชี้ความสมดุล)
+**Stratified by:** `{treat_col or "Overall"}`  
+**Difference Metric:** Standardized Mean Differences (SMD < 0.10 indicates balance)
 
 {html_t1}
 """
@@ -1439,9 +1459,9 @@ class ClinicalAnalystEngine:
                         predictor_cols=covariates or cols[:4],
                     )
                     table_md = coef_df.to_markdown(index=False)
-                    response_md = f"""### 🎯 ผลการวิเคราะห์ Multivariable Logistic Regression
+                    response_md = f"""### 🎯 Multivariable Logistic Regression
 
-**ตัวแปรตาม (Outcome Y):** `{target_outcome}` (Binary)  
+**Dependent Outcome (Y):** `{target_outcome}` (Binary)  
 **McFadden Pseudo-$R^2$:** `{metrics.get("mcfadden", 0.0):.4f}` | **AIC:** `{metrics.get("aic", 0.0):.1f}`
 
 {table_md}
@@ -1454,9 +1474,9 @@ class ClinicalAnalystEngine:
                         predictor_cols=covariates or num_cols[1:4],
                     )
                     table_md = coef_df.to_markdown(index=False)
-                    response_md = f"""### 📈 ผลการวิเคราะห์ Multivariable Linear Regression (OLS)
+                    response_md = f"""### 📈 Multivariable Linear Regression (OLS)
 
-**ตัวแปรตาม (Outcome Y):** `{target_outcome}` (Continuous)  
+**Dependent Outcome (Y):** `{target_outcome}` (Continuous)  
 **$R^2$:** `{res.get("r_squared", 0.0):.4f}` | **Adjusted $R^2$:** `{res.get("adj_r_squared", 0.0):.4f}` | **F-statistic P-value:** `{res.get("f_pvalue", 0.0):.4e}`
 
 {table_md}
@@ -1467,31 +1487,52 @@ class ClinicalAnalystEngine:
             if loaded_new_data or not user_msg:
                 quality_issues = check_data_quality(df)
                 fig = plot_missing_pattern(df)
-                response_md = f"""### 📊 โหลดชุดข้อมูล `{state.file_name}` เรียบร้อยแล้ว
+                response_md = f"""### 📊 Ingested Dataset: `{state.file_name}`
 
-**ขนาดข้อมูล:** `{len(df):,}` แถว | `{len(df.columns)}` คอลัมน์ | เซลล์สูญหาย (Missing): `{df.isna().sum().sum():,}` ({df.isna().sum().sum() / df.size * 100:.1f}%)
+**Cohort Size:** `{len(df):,}` rows | `{len(df.columns)}` columns | Missing Cells: `{df.isna().sum().sum():,}` ({df.isna().sum().sum() / df.size * 100:.1f}%)
 
-#### 🔍 ตัวแปรที่ตรวจจับทางคลินิก (Detected Clinical Schema):
+#### 🔍 Detected Clinical Schema:
 - **⏱️ Time Variable:** `{time_col or "None"}`
 - **🎯 Event / Outcome:** `{event_col or "None"}`
 - **👥 Group / Exposure:** `{treat_col or "None"}`
-- **📋 ตัวแปรกวน / Covariates:** {covar_str}
-- **⚠️ ปัญหาคุณภาพข้อมูล:** ตรวจพบ {len(quality_issues)} ประเด็น (Zero-PHI Verified)
+- **📋 Covariates:** {covar_str}
+- **⚠️ Data Quality Check:** Detected {len(quality_issues)} potential issues (Zero-PHI Verified)
 
-💡 *ท่านต้องการให้รันการวิเคราะห์อะไรเป็นพิเศษหรือไม่ครับ? เช่น "รัน survival analysis", "ทำ Table 1", "รัน logistic regression", หรือ "คำนวณ sample size"*
+💡 *Would you like to run a specific analysis? For example: "run survival analysis", "generate Table 1", "run logistic regression", or "calculate sample size".*
 """
                 return response_md, state, fig, df
 
         # Default conversational / General biostatistical query
-        pubmed_tool = PubMedEvidenceTool()
+        pubmed_query = user_msg if len(user_msg) > 5 else "clinical trial evidence"
+        if ClinicalAgentRunner.is_llm_available():
+            extracted_q = ClinicalAgentRunner.extract_biomedical_search_terms(user_msg)
+            if extracted_q:
+                pubmed_query = extracted_q
+
         articles: list[dict[str, Any]] = []
         try:
-            articles = pubmed_tool.search_and_extract(
-                user_msg if len(user_msg) > 5 else "clinical trial evidence",
-                max_results=2,
+            articles = ClinicalTopicIdeator._pubmed_tool.search_and_extract(
+                pubmed_query,
+                max_results=3,
             )
         except Exception as e:
             logger.warning(f"PubMed search error in clinical consultation: {e}")
+
+        # Live LLM Agent Consultation if token is present
+        if ClinicalAgentRunner.is_llm_available():
+            session_ctx = (
+                f"Active Dataset: {state.file_name} (n={len(state.df)} records, variables={state.df.columns.tolist()[:8]})"
+                if state.has_data() and state.df is not None
+                else "No active dataset loaded in session."
+            )
+            llm_consult = ClinicalAgentRunner.consult_llm(
+                user_query=user_msg,
+                articles=articles,
+                session_context=session_ctx,
+            )
+            if llm_consult:
+                return llm_consult, state, None, state.df
+
         vancouver_list = ""
         if articles:
             vancouver_list = "\n".join(
@@ -1499,22 +1540,22 @@ class ClinicalAnalystEngine:
             )
 
         pubmed_section = (
-            f"#### 📚 หลักฐานอ้างอิงจาก PubMed Benchmark:\n{vancouver_list}"
+            f"#### 📚 Benchmark Evidence from PubMed:\n{vancouver_list}"
             if vancouver_list
             else ""
         )
 
-        response_md = f"""### 🤖 คำแนะนำทางชีวสถิติและการออกแบบวิจัย (Clinical Tech Lead Consultation)
+        response_md = f"""### 🤖 Clinical Biostatistical & Study Design Consultation
 
-**ประเด็นการสนทนา:** {user_msg}
+**Topic / Query:** {user_msg}
 
-#### 💡 แนวทางปฏิบัติตามมาตรฐานสากล (SAMPL & EQUATOR Guidelines):
-1. **การกำหนด PICO & Endpoint:** ควรระบุ Primary Endpoint ให้ชัดเจนว่าเป็น Time-to-Event (ใช้ Kaplan-Meier / Cox PH), Binary Proportion (ใช้ Logistic Regression / Chi-square), หรือ Continuous Measurement (ใช้ ANCOVA / Linear Regression)
-2. **การควบคุม Confounder:** ในงานวิจัยสังเกตการณ์ (Observational Studies) แนะนำให้ใช้ Propensity Score Matching (PSM) หรือ Multivariable Regression เพื่อลดอคติจากการคัดเลือก
-3. **การรายงานค่าทางสถิติ:** รายงาน Effect Size พร้อม 95% Confidence Interval และ Exact P-value (ทศนิยม 2-3 ตำแหน่ง) เสมอ
+#### 💡 Methodological Guidance (SAMPL & EQUATOR Guidelines):
+1. **Endpoint & Study Seam:** Clearly define your primary endpoint as Time-to-Event (Kaplan-Meier / Cox PH), Binary Proportion (Logistic Regression / Chi-square), or Continuous Metric (Linear Regression / ANCOVA).
+2. **Confounder Control:** For observational cohorts, propensity score matching (PSM) or multivariable regression is recommended to reduce treatment selection bias.
+3. **Statistical Reporting:** Always report Effect Sizes (HR, OR, RR) with 95% Confidence Intervals and exact P-values.
 
 {pubmed_section}
 
-📁 *ท่านสามารถระบุหัวข้อที่สนใจ เช่น "dyspnea", "sepsis" หรืออัปโหลดไฟล์ Proposal (`.docx`) เพื่อให้ Agent เสนอแนวทางวิจัยและรันสถิติทันทีได้ครับ*
+📁 *You can specify a clinical topic (e.g., "dyspnea", "sepsis") or upload a Research Proposal (`.docx`) or Dataset (`.csv`, `.xlsx`, `.sav`) to execute statistical workflows immediately.*
 """
         return response_md, state, None, state.df

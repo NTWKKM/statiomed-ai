@@ -8,7 +8,12 @@ Orchestrates smolagents ToolCallingAgent with 2-Tier Model Strategy:
 """
 
 import os
+import re
 from typing import Any, List, Optional
+
+from logger import get_logger
+
+logger = get_logger(__name__)
 
 try:
     import spaces
@@ -25,6 +30,14 @@ except ImportError:
 
             return decorator
 
+
+try:
+    from huggingface_hub import InferenceClient
+
+    HAS_HF_HUB = True
+except ImportError:
+    HAS_HF_HUB = False
+    InferenceClient = None  # type: ignore
 
 try:
     from smolagents import HfApiModel, ToolCallingAgent
@@ -53,7 +66,6 @@ except ImportError:
             self.system_prompt = system_prompt
 
         def run(self, prompt: str) -> str:
-            # Fallback deterministic dispatcher if smolagents library is not available
             lower_p = prompt.lower()
             if "pubmed" in lower_p or "pico" in lower_p or "evidence" in lower_p:
                 tool = self.tools.get("pubmed_evidence_search")
@@ -79,8 +91,177 @@ Operating Guidelines:
 1. Zero-PHI Guarantee: Never accept, store, or output Protected Health Information (HN, Citizen ID, Names, Phone, DOB).
 2. SAMPL Compliance: Report P-values to 2-3 decimal places (e.g. P = 0.042, P < 0.001), 95% Confidence Intervals for effect sizes, and unrounded rational numbers in intermediate steps.
 3. EQUATOR Standards: Ensure study designs conform to STROBE (observational), CONSORT (RCT), TRIPOD+AI (prediction models), or STARD (diagnostics).
-4. Tool Utilization: Call formal tools (PubMedEvidenceTool, SampleSizeTool, SyntheticDataTool) to compute rigorous numbers instead of guessing.
+4. Rigor: Propose concrete primary endpoints, effect sizes (RR, OR, HR, RD), exact test statistics, and power calculations.
+5. Format: Output clean, professional markdown with high-contrast badge styling.
 """
+
+
+class ClinicalAgentRunner:
+    """
+    High-Reasoning LLM Agent Bridge powered by Hugging Face Inference API.
+    Supports Qwen 2.5 72B / Llama 3.3 70B with Zero-Cost offline fallback.
+    """
+
+    @classmethod
+    def get_token(cls) -> Optional[str]:
+        """Retrieves Hugging Face access token from environment."""
+        token = os.getenv("HF_TOKEN")
+        if token and token.strip():
+            return token.strip()
+        return None
+
+    @classmethod
+    def is_llm_available(cls) -> bool:
+        """Returns True if Hugging Face API token is configured."""
+        return cls.get_token() is not None and HAS_HF_HUB
+
+    @classmethod
+    def get_model_id(cls) -> str:
+        """Returns active LLM model identifier."""
+        return os.getenv("HF_MODEL_ID", "Qwen/Qwen2.5-72B-Instruct")
+
+    @classmethod
+    def chat_completion(
+        cls,
+        messages: list[dict[str, str]],
+        max_tokens: int = 1500,
+        temperature: float = 0.3,
+    ) -> Optional[str]:
+        """
+        Executes a chat completion call via Hugging Face InferenceClient.
+        Returns generated text or None if unconfigured / failed.
+        """
+        token = cls.get_token()
+        if not token or not HAS_HF_HUB:
+            return None
+
+        try:
+            client = InferenceClient(token=token, timeout=30.0)
+            model_id = cls.get_model_id()
+            res = client.chat.completions.create(
+                model=model_id,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            content = res.choices[0].message.content
+            return content.strip() if content else None
+        except Exception as e:
+            logger.warning("Hugging Face InferenceClient error: %s", e)
+            return None
+
+    @classmethod
+    def extract_biomedical_search_terms(cls, user_query: str) -> str:
+        """
+        Translates or extracts precise English MeSH/biomedical search terms from user inquiry.
+        """
+        if not cls.is_llm_available():
+            return user_query
+
+        prompt = (
+            f"You are a biomedical librarian. Extract 3 to 5 precise English medical keywords "
+            f"and MeSH search terms for PubMed search based on this user query (which may be in Thai or English):\n\n"
+            f'User Query: "{user_query}"\n\n'
+            f"Output ONLY the English search terms separated by space, without quotes, explanations, or punctuation."
+        )
+
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a concise medical keyword extractor.",
+            },
+            {"role": "user", "content": prompt},
+        ]
+        result = cls.chat_completion(messages, max_tokens=60, temperature=0.1)
+        if result:
+            clean_res = re.sub(r"[^\w\s-]", "", result).strip()
+            if clean_res:
+                return clean_res
+        return user_query
+
+    @classmethod
+    def synthesize_proposals_with_llm(
+        cls,
+        clinical_topic: str,
+        articles: list[dict[str, Any]],
+    ) -> Optional[str]:
+        """
+        Uses LLM to synthesize 5 tailored, publication-standard clinical study designs (SAMPL & EQUATOR compliant).
+        """
+        if not cls.is_llm_available():
+            return None
+
+        lit_summary = ""
+        if articles:
+            lit_summary = "\n".join(
+                [
+                    f"- {a['title']} ({a.get('journal', '')}, {a.get('pubdate', '')})"
+                    for a in articles
+                ]
+            )
+
+        prompt = f"""Clinical Research Topic / Question: "{clinical_topic}"
+
+Relevant Benchmark Literature from PubMed:
+{lit_summary or "None retrieved"}
+
+Please formulate 5 methodologically distinct, high-impact clinical study designs and statistical analysis plans (SAPs) adhering to SAMPL and EQUATOR guidelines.
+
+Cover these 5 designs:
+1. Option 1: Interventional RCT (CONSORT 2010 compliant)
+2. Option 2: Time-to-Event Survival Cohort (STROBE compliant, Kaplan-Meier & Cox PH)
+3. Option 3: Diagnostic Accuracy Trial (STARD 2015 compliant, Sensitivity, Specificity, Likelihood Ratios)
+4. Option 4: Clinical Prediction Model (TRIPOD+AI compliant, Multivariable Logistic / Machine Learning, ROC/AUC, Calibration)
+5. Option 5: Real-World Comparative Effectiveness with Propensity Score Matching (PSM, 1:1 Nearest-Neighbor, SMD < 0.10)
+
+For each option, provide:
+- Clinical Rationale & Objective
+- PICO (Population, Intervention/Exposure, Comparator, Primary Endpoint)
+- Recommended Statistical Plan
+- Estimated Sample Size & Power Justification
+
+Format output in professional, publication-ready English Markdown.
+"""
+
+        messages = [
+            {"role": "system", "content": CLINICAL_TECH_LEAD_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+        return cls.chat_completion(messages, max_tokens=2500, temperature=0.4)
+
+    @classmethod
+    def consult_llm(
+        cls,
+        user_query: str,
+        articles: list[dict[str, Any]],
+        session_context: str = "",
+    ) -> Optional[str]:
+        """
+        Executes a deep clinical consultation turn using the LLM agent.
+        """
+        if not cls.is_llm_available():
+            return None
+
+        lit_summary = ""
+        if articles:
+            lit_summary = "PubMed Literature Citations:\n" + "\n".join(
+                [f"- {a['title']} | {a['vancouver_citation']}" for a in articles]
+            )
+
+        prompt = f"""User Question / Consultation:
+"{user_query}"
+
+{session_context}
+
+{lit_summary}
+
+Provide expert clinical tech lead consultation. Ensure all statistical guidance complies with SAMPL & EQUATOR standards. If suggesting analyses, provide explicit test statistics and effect size definitions.
+"""
+        messages = [
+            {"role": "system", "content": CLINICAL_TECH_LEAD_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+        return cls.chat_completion(messages, max_tokens=1800, temperature=0.3)
 
 
 def get_model(backend: Optional[str] = None):
