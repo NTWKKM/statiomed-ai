@@ -313,13 +313,28 @@ class StatHarness:
                     index_test_col = idx_col
                     ref_standard_col = ref_col
 
-        used_example_counts = (
-            tp is None and fp is None and fn is None and tn is None and calc_tp is None
-        )
-        final_tp = tp if tp is not None else (calc_tp if calc_tp is not None else 85)
-        final_fp = fp if fp is not None else (calc_fp if calc_fp is not None else 15)
-        final_fn = fn if fn is not None else (calc_fn if calc_fn is not None else 15)
-        final_tn = tn if tn is not None else (calc_tn if calc_tn is not None else 185)
+        # Strict validation: require complete explicit 2x2 matrix or valid DataFrame inputs
+        has_explicit = any(c is not None for c in (tp, fp, fn, tn))
+        if has_explicit:
+            if not all(c is not None for c in (tp, fp, fn, tn)):
+                raise ValueError(
+                    "Incomplete 2x2 contingency matrix: tp, fp, fn, and tn must all be specified when providing explicit cell counts."
+                )
+            if any(c < 0 for c in (int(tp), int(fp), int(fn), int(tn))):
+                raise ValueError(
+                    "2x2 contingency matrix cell counts cannot be negative."
+                )
+            final_tp, final_fp, final_fn, final_tn = int(tp), int(fp), int(fn), int(tn)
+            used_example_counts = False
+        elif calc_tp is not None:
+            final_tp, final_fp, final_fn, final_tn = calc_tp, calc_fp, calc_fn, calc_tn
+            used_example_counts = False
+        else:
+            raise ValueError(
+                "No valid data provided for diagnostic accuracy calculation. "
+                "Please provide a DataFrame with valid index test and reference standard columns, "
+                "or specify all 4 contingency matrix cell counts (tp, fp, fn, tn)."
+            )
 
         total = final_tp + final_fp + final_fn + final_tn
         if pre_test_prob is None:

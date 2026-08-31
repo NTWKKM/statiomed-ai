@@ -93,19 +93,31 @@ def test_stat_harness_diagnostic_explicit_counts():
     assert fig is not None
 
 
-def test_stat_harness_diagnostic_fallback_flag():
-    # When no df or explicit counts are provided, used_example_counts should be True
-    _metrics_df, metrics, _fig = StatHarness.run_diagnostic()
-    assert metrics["used_example_counts"] is True
-    assert metrics["tp"] == 85
-    assert metrics["fp"] == 15
-    assert metrics["fn"] == 15
-    assert metrics["tn"] == 185
+def test_stat_harness_diagnostic_strict_validation():
+    import pytest
 
-    # When explicit counts are provided, used_example_counts should be False
+    # When no df or explicit counts are provided, ValueError must be raised
+    with pytest.raises(ValueError, match="No valid data provided"):
+        StatHarness.run_diagnostic()
+
+    # When counts are partially specified, ValueError must be raised
+    with pytest.raises(ValueError, match="Incomplete 2x2 contingency matrix"):
+        StatHarness.run_diagnostic(tp=50)
+
+    with pytest.raises(ValueError, match="Incomplete 2x2 contingency matrix"):
+        StatHarness.run_diagnostic(tp=50, fp=10, fn=5)
+
+    # When negative counts are specified, ValueError must be raised
+    with pytest.raises(ValueError, match="cannot be negative"):
+        StatHarness.run_diagnostic(tp=-5, fp=10, fn=5, tn=20)
+
+    # When all 4 explicit counts are provided, it must succeed with used_example_counts=False
     _metrics_df2, metrics2, _fig2 = StatHarness.run_diagnostic(tp=50, fp=5, fn=5, tn=50)
     assert metrics2["used_example_counts"] is False
     assert metrics2["tp"] == 50
+    assert metrics2["fp"] == 5
+    assert metrics2["fn"] == 5
+    assert metrics2["tn"] == 50
 
 
 def test_stat_harness_diagnostic_haldane_anscombe_continuity():
