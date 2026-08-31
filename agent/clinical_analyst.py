@@ -20,9 +20,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import scipy.stats as stats
 
-from agent.agent_runner import ClinicalAgentRunner, create_clinical_agent
-from agent.critique_engine import CritiqueEngine, CritiqueVerdict
-from agent.tools.tool_pubmed import PubMedEvidenceTool
+from agent.agent_runner import ClinicalAgentRunner
+from agent.critique_engine import CritiqueEngine
 from agent.tools.tool_sample_size import SampleSizeTool
 from agent.tools.tool_synthetic_data import SyntheticDataTool
 from agent.topic_ideator import ClinicalTopicIdeator
@@ -136,7 +135,7 @@ class StatHarness:
         cox_df = None
         cox_stats = {}
         if covar_cols and len(covar_cols) > 0:
-            cph, res_df, _, err, c_stats, _ = survival_lib.fit_cox_ph(
+            cph, res_df, clean_data, err, c_stats, _ = survival_lib.fit_cox_ph(
                 df=df,
                 duration_col=time_col,
                 event_col=event_col,
@@ -145,6 +144,24 @@ class StatHarness:
             if not err and res_df is not None:
                 cox_df = res_df
                 cox_stats = c_stats or {}
+                if cph is not None and hasattr(cph, "compute_residuals"):
+                    try:
+                        from lifelines.statistics import proportional_hazard_test
+
+                        ph_res = proportional_hazard_test(
+                            cph, clean_data, time_transform="rank"
+                        )
+                        min_p = (
+                            float(ph_res.summary["p"].min())
+                            if not ph_res.summary.empty
+                            else 1.0
+                        )
+                        cox_stats["ph_diagnostic"] = {
+                            "passed": bool(min_p >= 0.05),
+                            "p_value": min_p,
+                        }
+                    except Exception as e:
+                        logger.debug("Proportional hazards test exception: %s", e)
 
         return (
             km_fig,
@@ -167,9 +184,17 @@ class StatHarness:
         clean_cols = [outcome_col] + [c for c in predictor_cols if c in df.columns]
         df_clean = df[clean_cols].dropna()
 
+        clean_y = _coerce_to_binary_series(df_clean[outcome_col])
+        fitted_events = int((clean_y == 1).sum())
+        fitted_non_events = int((clean_y == 0).sum())
+
         html_table, or_results, status, metrics = logic.run_logistic_regression(
             df=df_clean, outcome_col=outcome_col, covariate_cols=predictor_cols
         )
+        metrics = metrics or {}
+        metrics["n_clean"] = len(df_clean)
+        metrics["fitted_events"] = fitted_events
+        metrics["fitted_non_events"] = fitted_non_events
         rows = []
         if or_results:
             for var_name, r in or_results.items():
@@ -897,6 +922,9 @@ class ClinicalAnalystEngine:
                     outcome_col=o_col,
                 )
                 critique = CritiqueEngine.appraise_analysis("rct", df_gen, metrics)
+                state.last_analysis_type = "rct"
+                state.last_analysis_results = metrics
+                state.last_critique_md = critique.to_markdown()
                 response_md = f"""### 🚀 Executing Option {opt_id} (Randomized Controlled Trial - CONSORT 2010)
 
 **Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} patients)
@@ -944,6 +972,9 @@ class ClinicalAnalystEngine:
                         "cox_stats": stats_dict.get("cox_stats", {}),
                     },
                 )
+                state.last_analysis_type = "survival"
+                state.last_analysis_results = stats_dict
+                state.last_critique_md = critique.to_markdown()
                 response_md = f"""### 🚀 Executing Option {opt_id} (Kaplan-Meier & Cox Proportional Hazards - STROBE)
 
 **Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} patients)
@@ -1007,6 +1038,9 @@ class ClinicalAnalystEngine:
                 critique = CritiqueEngine.appraise_analysis(
                     "diagnostic", df_gen, metrics
                 )
+                state.last_analysis_type = "diagnostic"
+                state.last_analysis_results = metrics
+                state.last_critique_md = critique.to_markdown()
                 response_md = f"""### 🚀 Executing Option {opt_id} (Diagnostic Accuracy & Fagan Nomogram - STARD 2015)
 
 **Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} subjects)
@@ -1044,8 +1078,13 @@ class ClinicalAnalystEngine:
                         "outcome_col": o_col,
                         "predictor_cols": p_cols,
                         "coef_df": coef_df,
+                        "fitted_events": metrics.get("fitted_events"),
+                        "fitted_non_events": metrics.get("fitted_non_events"),
                     },
                 )
+                state.last_analysis_type = "logistic"
+                state.last_analysis_results = metrics
+                state.last_critique_md = critique.to_markdown()
                 response_md = f"""### 🚀 Executing Option {opt_id} (Clinical Prediction Model - TRIPOD+AI)
 
 **Dataset:** `{state.file_name}` (n = {len(df_gen):,} records)  
@@ -1089,6 +1128,9 @@ class ClinicalAnalystEngine:
 """
 
                 critique = CritiqueEngine.appraise_analysis("psm", df_gen, stats_dict)
+                state.last_analysis_type = "psm"
+                state.last_analysis_results = stats_dict
+                state.last_critique_md = critique.to_markdown()
                 response_md = f"""### 🚀 Executing Option {opt_id} (Propensity Score Matching & Causal Inference)
 
 **Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} records)
@@ -1461,6 +1503,9 @@ Dataset saved to session and ready for downstream analysis.
                         "cox_stats": stats_dict.get("cox_stats", {}),
                     },
                 )
+                state.last_analysis_type = "survival"
+                state.last_analysis_results = stats_dict
+                state.last_critique_md = critique.to_markdown()
 
                 response_md = f"""### ⏱️ Survival Analysis Execution
 
@@ -1519,8 +1564,13 @@ Dataset saved to session and ready for downstream analysis.
                             "outcome_col": target_outcome,
                             "predictor_cols": covariates or cols[:4],
                             "coef_df": coef_df,
+                            "fitted_events": metrics.get("fitted_events"),
+                            "fitted_non_events": metrics.get("fitted_non_events"),
                         },
                     )
+                    state.last_analysis_type = "logistic"
+                    state.last_analysis_results = metrics
+                    state.last_critique_md = critique.to_markdown()
                     response_md = f"""### 🎯 Multivariable Logistic Regression
 
 **Dependent Outcome (Y):** `{target_outcome}` (Binary)  

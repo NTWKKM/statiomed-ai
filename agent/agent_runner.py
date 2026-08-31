@@ -11,6 +11,9 @@ import os
 import re
 from typing import Any, List, Optional
 
+import pandas as pd
+
+from core.common import select_variable_by_keyword
 from logger import get_logger
 
 logger = get_logger(__name__)
@@ -65,6 +68,11 @@ except ImportError:
             self.model = model
             self.system_prompt = system_prompt
 
+        def _get_df(self, tool: Any) -> Optional[pd.DataFrame]:
+            if hasattr(tool, "state_df_provider") and callable(tool.state_df_provider):
+                return tool.state_df_provider()
+            return None
+
         def run(self, prompt: str) -> str:
             lower_p = prompt.lower()
             if "sample size" in lower_p or "power" in lower_p or "n_total" in lower_p:
@@ -79,7 +87,53 @@ except ImportError:
             ):
                 tool = self.tools.get("survival_analysis")
                 if tool:
-                    return tool.forward(time_col="time", event_col="event")
+                    df = self._get_df(tool)
+                    if df is None or df.empty:
+                        return tool.forward(time_col="time", event_col="event")
+                    cols = df.columns.tolist()
+                    time_col = select_variable_by_keyword(
+                        cols,
+                        [
+                            "time",
+                            "duration",
+                            "followup",
+                            "follow_up",
+                            "days",
+                            "months",
+                            "years",
+                            "surv_time",
+                            "os_months",
+                            "pfs_days",
+                        ],
+                        default_to_first=False,
+                    )
+                    if not time_col:
+                        num_cols = df.select_dtypes(include=["number"]).columns.tolist()
+                        if num_cols:
+                            time_col = num_cols[0]
+                    event_col = select_variable_by_keyword(
+                        [c for c in cols if c != time_col],
+                        [
+                            "event",
+                            "status",
+                            "death",
+                            "censored",
+                            "recurrence",
+                            "mortality",
+                            "outcome",
+                            "target",
+                        ],
+                        default_to_first=False,
+                    )
+                    if not event_col:
+                        candidates = [c for c in cols if c != time_col]
+                        for c in candidates:
+                            if df[c].dropna().nunique() <= 2:
+                                event_col = c
+                                break
+                    if time_col and event_col:
+                        return tool.forward(time_col=time_col, event_col=event_col)
+                    return "Error: Could not resolve valid time duration and event indicator columns in active dataset for survival analysis. Please provide columns for follow-up duration and event status."
             elif (
                 "table 1" in lower_p
                 or "baseline characteristics" in lower_p
@@ -91,9 +145,40 @@ except ImportError:
             elif "logistic" in lower_p or "odds ratio" in lower_p:
                 tool = self.tools.get("logistic_regression")
                 if tool:
-                    return tool.forward(
-                        outcome_col="outcome", predictor_cols=["treatment", "age"]
+                    df = self._get_df(tool)
+                    if df is None or df.empty:
+                        return tool.forward(
+                            outcome_col="outcome", predictor_cols=["treatment", "age"]
+                        )
+                    cols = df.columns.tolist()
+                    outcome_col = select_variable_by_keyword(
+                        cols,
+                        [
+                            "outcome",
+                            "death",
+                            "event",
+                            "status",
+                            "response",
+                            "target",
+                            "disease",
+                            "mortality",
+                            "y",
+                        ],
+                        default_to_first=False,
                     )
+                    if not outcome_col:
+                        for c in cols:
+                            if df[c].dropna().nunique() <= 2:
+                                outcome_col = c
+                                break
+                    if outcome_col:
+                        preds = [c for c in cols if c != outcome_col]
+                        if preds:
+                            return tool.forward(
+                                outcome_col=outcome_col, predictor_cols=preds[:4]
+                            )
+                        return "Error: No predictor columns available in active dataset for logistic regression."
+                    return "Error: Could not resolve a valid binary outcome column in active dataset for logistic regression. Please provide a binary outcome variable."
             elif (
                 "diagnostic" in lower_p
                 or "sensitivity" in lower_p
@@ -102,7 +187,49 @@ except ImportError:
             ):
                 tool = self.tools.get("diagnostic_accuracy")
                 if tool:
-                    return tool.forward(tp=85, fp=15, fn=15, tn=185)
+                    df = self._get_df(tool)
+                    if df is not None and not df.empty:
+                        cols = df.columns.tolist()
+                        idx_col = select_variable_by_keyword(
+                            cols,
+                            [
+                                "pocus",
+                                "index_test",
+                                "index",
+                                "test",
+                                "screening",
+                                "biomarker",
+                                "assay",
+                                "marker",
+                            ],
+                            default_to_first=False,
+                        )
+                        ref_col = select_variable_by_keyword(
+                            [c for c in cols if c != idx_col],
+                            [
+                                "gold_standard",
+                                "reference",
+                                "ref",
+                                "disease",
+                                "diagnosis",
+                                "status",
+                                "mortality",
+                                "death",
+                                "event",
+                                "outcome",
+                            ],
+                            default_to_first=False,
+                        )
+                        if not idx_col and len(cols) >= 1:
+                            idx_col = cols[0]
+                        if not ref_col and len(cols) >= 2:
+                            ref_col = [c for c in cols if c != idx_col][0]
+                        if idx_col and ref_col:
+                            return tool.forward(
+                                index_test_col=idx_col, ref_standard_col=ref_col
+                            )
+                        return "Error: Could not resolve valid index test and reference standard columns in active dataset for diagnostic accuracy."
+                    return "Error: No active dataset loaded in session for diagnostic accuracy. Please load a dataset with index and reference columns or specify all four 2x2 contingency counts (tp, fp, fn, tn)."
             elif (
                 "rct" in lower_p
                 or "consort" in lower_p
@@ -111,9 +238,46 @@ except ImportError:
             ):
                 tool = self.tools.get("binary_rct_analysis")
                 if tool:
-                    return tool.forward(
-                        treatment_col="treatment", outcome_col="outcome"
+                    df = self._get_df(tool)
+                    if df is None or df.empty:
+                        return tool.forward(
+                            treatment_col="treatment", outcome_col="outcome"
+                        )
+                    cols = df.columns.tolist()
+                    t_col = select_variable_by_keyword(
+                        cols,
+                        [
+                            "treatment",
+                            "treat",
+                            "arm",
+                            "group",
+                            "intervention",
+                            "therapy",
+                            "rx",
+                        ],
+                        default_to_first=False,
                     )
+                    o_col = select_variable_by_keyword(
+                        [c for c in cols if c != t_col],
+                        [
+                            "outcome",
+                            "death",
+                            "event",
+                            "status",
+                            "endpoint",
+                            "primary",
+                            "mortality",
+                            "response",
+                        ],
+                        default_to_first=False,
+                    )
+                    if not t_col and len(cols) >= 1:
+                        t_col = cols[0]
+                    if not o_col and len(cols) >= 2:
+                        o_col = [c for c in cols if c != t_col][0]
+                    if t_col and o_col:
+                        return tool.forward(treatment_col=t_col, outcome_col=o_col)
+                    return "Error: Could not resolve valid treatment and outcome columns in active dataset for RCT analysis."
             elif (
                 "psm" in lower_p
                 or "propensity" in lower_p
@@ -121,15 +285,69 @@ except ImportError:
             ):
                 tool = self.tools.get("propensity_score_matching")
                 if tool:
-                    return tool.forward(
-                        treatment_col="treatment", covariate_cols=["age", "bmi"]
+                    df = self._get_df(tool)
+                    if df is None or df.empty:
+                        return tool.forward(
+                            treatment_col="treatment", covariate_cols=["age", "bmi"]
+                        )
+                    cols = df.columns.tolist()
+                    t_col = select_variable_by_keyword(
+                        cols,
+                        [
+                            "treatment",
+                            "treat",
+                            "arm",
+                            "group",
+                            "exposure",
+                            "intervention",
+                            "therapy",
+                        ],
+                        default_to_first=False,
                     )
+                    if not t_col and cols:
+                        t_col = cols[0]
+                    covars = [c for c in cols if c != t_col]
+                    if t_col and covars:
+                        return tool.forward(
+                            treatment_col=t_col, covariate_cols=covars[:4]
+                        )
+                    return "Error: Could not resolve valid treatment indicator and covariate columns in active dataset for PSM."
             elif "linear" in lower_p or "ols" in lower_p:
                 tool = self.tools.get("linear_regression")
                 if tool:
-                    return tool.forward(
-                        outcome_col="outcome", predictor_cols=["age", "treatment"]
+                    df = self._get_df(tool)
+                    if df is None or df.empty:
+                        return tool.forward(
+                            outcome_col="outcome", predictor_cols=["age", "treatment"]
+                        )
+                    cols = df.columns.tolist()
+                    num_cols = df.select_dtypes(include=["number"]).columns.tolist()
+                    out_col = select_variable_by_keyword(
+                        num_cols or cols,
+                        [
+                            "outcome",
+                            "continuous",
+                            "y",
+                            "target",
+                            "score",
+                            "sbp",
+                            "los",
+                            "creatinine",
+                            "bmi",
+                            "measurement",
+                        ],
+                        default_to_first=False,
                     )
+                    if not out_col and num_cols:
+                        out_col = num_cols[0]
+                    elif not out_col and cols:
+                        out_col = cols[0]
+                    preds = [c for c in cols if c != out_col]
+                    if out_col and preds:
+                        return tool.forward(
+                            outcome_col=out_col, predictor_cols=preds[:4]
+                        )
+                    return "Error: Could not resolve valid continuous outcome and predictor columns in active dataset for linear regression."
             elif "pubmed" in lower_p or "pico" in lower_p or "evidence" in lower_p:
                 tool = self.tools.get("pubmed_evidence_search")
                 if tool:
@@ -355,16 +573,16 @@ def create_clinical_agent(
     """
     from agent.tools.tool_pubmed import PubMedEvidenceTool
     from agent.tools.tool_sample_size import SampleSizeTool
-    from agent.tools.tool_synthetic_data import SyntheticDataTool
     from agent.tools.tool_stat_harness import (
-        SurvivalAnalysisTool,
         BaselineTableOneTool,
-        LogisticRegressionTool,
-        DiagnosticAccuracyTool,
         BinaryRCTTool,
-        PropensityScoreMatchingTool,
+        DiagnosticAccuracyTool,
         LinearRegressionTool,
+        LogisticRegressionTool,
+        PropensityScoreMatchingTool,
+        SurvivalAnalysisTool,
     )
+    from agent.tools.tool_synthetic_data import SyntheticDataTool
 
     if tools is None:
         tools = [

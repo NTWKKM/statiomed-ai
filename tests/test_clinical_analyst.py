@@ -1,8 +1,8 @@
-"""
-tests/test_clinical_analyst.py - Unit tests for Clinical Analyst Engine & Statistical Harness
-"""
+import numpy as np
+import pandas as pd
 
 from agent.clinical_analyst import ClinicalAnalystEngine, StatHarness
+from agent.critique_engine import CritiqueEngine
 from core.state import AppState
 from views.view_data import generate_example_dataset
 
@@ -217,3 +217,56 @@ def test_clinical_analyst_turn_sample_size():
     assert (
         "\\alpha" in response_md or "alpha" in response_md.lower() or "α" in response_md
     )
+
+
+def test_logistic_epv_with_predictor_missingness():
+    # 100 subjects: 25 events, 75 non-events in full df
+    # 20 out of 25 event cases have missing biomarker -> listwise deletion drops them
+    # Fitted cohort has only 5 events -> for 2 predictors, fitted EPV = 5/2 = 2.5 (Severe EPV Deficit < 5)
+    np.random.seed(42)
+    n = 100
+    y = np.array([1] * 25 + [0] * 75)
+    age = np.random.normal(55, 10, n)
+    biomarker = np.random.normal(10, 2, n)
+    # Introduce NaN in biomarker for 20 event cases
+    biomarker[:20] = np.nan
+
+    df = pd.DataFrame({"death": y, "age": age, "biomarker": biomarker})
+
+    coef_df, metrics, fig = StatHarness.run_logistic(
+        df=df, outcome_col="death", predictor_cols=["age", "biomarker"]
+    )
+    assert metrics["fitted_events"] == 5
+    assert metrics["fitted_non_events"] == 75
+    assert metrics["n_clean"] == 80
+
+    verdict = CritiqueEngine.appraise_analysis(
+        "logistic",
+        df=df,
+        results_meta={
+            "outcome_col": "death",
+            "predictor_cols": ["age", "biomarker"],
+            "coef_df": coef_df,
+            "fitted_events": metrics["fitted_events"],
+            "fitted_non_events": metrics["fitted_non_events"],
+        },
+    )
+
+    # EPV should be assessed against fitted cohort (5 events / 2 predictors = 2.5 -> HIGH risk)
+    epv_finding = next((f for f in verdict.findings if f.category == "EPV"), None)
+    assert epv_finding is not None
+    assert epv_finding.severity == "HIGH"
+    assert "Severe EPV Deficit" in epv_finding.title
+    assert "2.5" in epv_finding.title or "5 effective events" in epv_finding.description
+    assert verdict.overall_status == "HIGH_RISK_BIAS"
+
+    # Turn processing preserves critique in state
+    state = AppState(df=df, file_name="epv_test.csv")
+    resp_md, new_state, _, _ = ClinicalAnalystEngine.process_turn(
+        user_message="logistic regression death on age and biomarker",
+        file_paths=None,
+        state=state,
+    )
+    assert new_state.last_analysis_type == "logistic"
+    assert new_state.last_critique_md is not None
+    assert "Severe EPV Deficit" in new_state.last_critique_md

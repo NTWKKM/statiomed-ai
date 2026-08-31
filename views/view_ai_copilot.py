@@ -18,7 +18,6 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from agent.clinical_analyst import ClinicalAnalystEngine
-from agent.critique_engine import CritiqueEngine
 from agent.manuscript_engine import ManuscriptEngine
 from agent.tools.tool_synthetic_data import SyntheticDataTool
 from core.state import AppState
@@ -162,12 +161,16 @@ def chat_submit_action(
         """
         )
 
-        critique_summary = """
-### 🛡️ Real-Time Methodology & Bias Appraisal
-All statistical computations executed via calibrated `lifelines`, `statsmodels`, and `pingouin` engines.
-- **Assumptions Checked:** Events-Per-Variable (EPV), Proportional Hazards, Missingness severity, Small-cell counts.
-- **Reporting Standard:** STROBE / CONSORT / STARD & SAMPL Guidelines.
-"""
+        critique_summary = (
+            getattr(new_state, "last_critique_md", None)
+            or (
+                new_state.last_analysis_results.get("critique_md")
+                if isinstance(new_state.last_analysis_results, dict)
+                else None
+            )
+            or """### 🛡️ Automated Clinical Appraisal
+*No statistical analysis executed in this turn. Run a statistical analysis or select an option to view automated bias appraisal, EPV checks, and assumption tests.*"""
+        )
 
         return (
             chat_history,
@@ -268,7 +271,7 @@ def create_ai_copilot_view(
                         show_label=False,
                         container=False,
                         elem_classes=["workspace-pill-select"],
-                        interactive=True,
+                        interactive=False,
                     )
                     btn_clear = gr.Button(
                         "🗑️ Reset",
@@ -370,12 +373,12 @@ def create_ai_copilot_view(
                                 show_label=False,
                                 container=False,
                                 elem_classes=["clean-model-pill"],
-                                interactive=True,
+                                interactive=False,
                             )
 
                         # Right Toolbar Group: Mic icon & Circular Send button
                         with gr.Row(elem_classes=["toolbar-right-group"]):
-                            btn_mic = gr.Button(
+                            gr.Button(
                                 "🎙️",
                                 variant="secondary",
                                 elem_classes=["btn-icon-mic"],
@@ -398,7 +401,7 @@ def create_ai_copilot_view(
                         show_label=False,
                         container=False,
                         elem_classes=["storage-pill-select"],
-                        interactive=True,
+                        interactive=False,
                     )
 
             # =========================================================================

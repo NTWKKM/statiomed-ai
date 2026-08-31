@@ -40,6 +40,7 @@ class AppState:
     # Cached Model Results / Analysis Outputs
     last_analysis_type: str | None = None
     last_analysis_results: dict[str, Any] = field(default_factory=dict)
+    last_critique_md: str | None = None
 
     def has_data(self) -> bool:
         """Returns True if a primary dataset is loaded and non-empty."""
@@ -129,3 +130,4 @@ class AppState:
         self.mi_imputed_datasets = []
         self.last_analysis_type = None
         self.last_analysis_results = {}
+        self.last_critique_md = None

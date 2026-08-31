@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-import numpy as np
+
 import pandas as pd
 
 
@@ -144,7 +144,7 @@ class CritiqueEngine:
             if or_val is not None:
                 try:
                     num_or = float(str(or_val).replace(",", ""))
-                    if num_or > 100.0 or (0 < num_or < 0.01):
+                    if num_or > 100.0 or (0.0 <= num_or < 0.01):
                         return CritiqueFinding(
                             category="Separation",
                             severity="HIGH",
@@ -220,21 +220,31 @@ class CritiqueEngine:
         events_treat: int,
         n_treat: int,
     ) -> Optional[CritiqueFinding]:
-        """Checks for sparse cell counts in RCT contingency table (< 5)."""
-        cells = [
-            events_ctrl,
-            max(0, n_ctrl - events_ctrl),
-            events_treat,
-            max(0, n_treat - events_treat),
-        ]
-        if any(c < 5 for c in cells):
-            min_c = min(cells)
+        """Checks for sparse expected cell counts in RCT contingency table (< 5)."""
+        n_total = n_ctrl + n_treat
+        if n_total <= 0:
+            return None
+
+        non_events_ctrl = max(0, n_ctrl - events_ctrl)
+        non_events_treat = max(0, n_treat - events_treat)
+        total_events = events_ctrl + events_treat
+        total_non_events = non_events_ctrl + non_events_treat
+
+        # Derive all four expected cell counts from margins: (Row Total * Col Total) / Grand Total
+        e11 = (n_ctrl * total_events) / n_total
+        e12 = (n_ctrl * total_non_events) / n_total
+        e21 = (n_treat * total_events) / n_total
+        e22 = (n_treat * total_non_events) / n_total
+        expected_cells = [e11, e12, e21, e22]
+
+        if any(e < 5.0 for e in expected_cells):
+            min_e = min(expected_cells)
             return CritiqueFinding(
                 category="Sample_Size",
                 severity="MODERATE",
-                title=f"Sparse Contingency Cell Count (Min Cell = {min_c})",
+                title=f"Sparse Contingency Cell Count (Min Expected Cell = {min_e:.1f})",
                 description=(
-                    f"One or more cells in the 2x2 contingency table has < 5 observations ({min_c}). "
+                    f"One or more expected cell counts in the 2x2 contingency table is < 5 ({min_e:.1f}). "
                     "Asymptotic Chi-Square distribution assumption is violated."
                 ),
                 recommendation=(
@@ -264,15 +274,51 @@ class CritiqueEngine:
             strengths.append(
                 "Time-to-event censorship properly incorporated via product-limit estimator."
             )
-            strengths.append(
-                "Non-parametric Log-Rank test provides unbiased group comparison under proportional hazards."
-            )
 
             covar_cols = results_meta.get("covar_cols", [])
             cox_stats = results_meta.get("cox_stats", {})
             event_col = results_meta.get("event_col", "event")
             events = int(df[event_col].sum()) if event_col in df.columns else 0
             non_events = len(df) - events
+
+            # Proportional Hazards (PH) diagnostic check
+            ph_diag = results_meta.get("ph_diagnostic")
+            if ph_diag is None and isinstance(cox_stats, dict):
+                ph_diag = cox_stats.get("ph_diagnostic", cox_stats.get("ph_test"))
+
+            if ph_diag is not None:
+                if isinstance(ph_diag, dict):
+                    passed = ph_diag.get("passed")
+                    if passed is None and "p_value" in ph_diag:
+                        p_val = ph_diag["p_value"]
+                        passed = (
+                            (p_val >= 0.05) if isinstance(p_val, (int, float)) else None
+                        )
+                elif isinstance(ph_diag, bool):
+                    passed = ph_diag
+                else:
+                    passed = None
+
+                if passed is True:
+                    strengths.append(
+                        "Proportional hazards (PH) assumption verified via Schoenfeld residuals."
+                    )
+                elif passed is False:
+                    findings.append(
+                        CritiqueFinding(
+                            category="PH_Assumption",
+                            severity="HIGH",
+                            title="Violation of Proportional Hazards (PH) Assumption",
+                            description=(
+                                "Schoenfeld residuals test indicates non-proportional hazards over time (P < 0.05). "
+                                "Constant hazard ratio assumption does not hold."
+                            ),
+                            recommendation=(
+                                "Consider stratified Cox regression, time-varying covariates, or restricted mean survival time (RMST) analysis."
+                            ),
+                        )
+                    )
+            # When ph_diag is absent, PH is marked as unassessed without adding strength
 
             # EPV check
             if covar_cols:
@@ -303,10 +349,25 @@ class CritiqueEngine:
 
             outcome_col = results_meta.get("outcome_col", "outcome")
             pred_cols = results_meta.get("predictor_cols", [])
-            events = (
-                int((df[outcome_col] == 1).sum()) if outcome_col in df.columns else 0
-            )
-            non_events = len(df) - events
+
+            if (
+                "fitted_events" in results_meta
+                and results_meta["fitted_events"] is not None
+            ):
+                events = int(results_meta["fitted_events"])
+                non_events = (
+                    int(results_meta["fitted_non_events"])
+                    if "fitted_non_events" in results_meta
+                    and results_meta["fitted_non_events"] is not None
+                    else len(df) - events
+                )
+            else:
+                events = (
+                    int((df[outcome_col] == 1).sum())
+                    if outcome_col in df.columns
+                    else 0
+                )
+                non_events = len(df) - events
 
             epv_find = cls.evaluate_epv(events, non_events, len(pred_cols))
             if epv_find:
