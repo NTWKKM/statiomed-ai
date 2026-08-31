@@ -313,6 +313,9 @@ class StatHarness:
                     index_test_col = idx_col
                     ref_standard_col = ref_col
 
+        used_example_counts = (
+            tp is None and fp is None and fn is None and tn is None and calc_tp is None
+        )
         final_tp = tp if tp is not None else (calc_tp if calc_tp is not None else 85)
         final_fp = fp if fp is not None else (calc_fp if calc_fp is not None else 15)
         final_fn = fn if fn is not None else (calc_fn if calc_fn is not None else 15)
@@ -329,12 +332,32 @@ class StatHarness:
         spec = final_tn / (final_tn + final_fp) if (final_tn + final_fp) > 0 else 0.0
         ppv = final_tp / (final_tp + final_fp) if (final_tp + final_fp) > 0 else 0.0
         npv = final_tn / (final_tn + final_fn) if (final_tn + final_fn) > 0 else 0.0
-        lr_pos = (sens / (1.0 - spec)) if (1.0 - spec) > 0 else 1.0
-        lr_neg = ((1.0 - sens) / spec) if spec > 0 else 1.0
+
+        # Haldane-Anscombe continuity correction avoids reporting an uninformative LR of 1.0
+        # when a cell count is zero or when sensitivity/specificity reach boundary values (1.0 or 0.0).
+        if (
+            (1.0 - spec) > 0
+            and spec > 0
+            and (final_tp + final_fn) > 0
+            and (final_tn + final_fp) > 0
+        ):
+            lr_pos = sens / (1.0 - spec)
+            lr_neg = (1.0 - sens) / spec
+        else:
+            c_tp, c_fp = final_tp + 0.5, final_fp + 0.5
+            c_fn, c_tn = final_fn + 0.5, final_tn + 0.5
+            c_sens = c_tp / (c_tp + c_fn)
+            c_spec = c_tn / (c_tn + c_fp)
+            lr_pos = c_sens / (1.0 - c_spec)
+            lr_neg = (1.0 - c_sens) / c_spec
+
         dor = (
             ((final_tp * final_tn) / (final_fp * final_fn))
             if (final_fp * final_fn) > 0
-            else 1.0
+            else (
+                ((final_tp + 0.5) * (final_tn + 0.5))
+                / ((final_fp + 0.5) * (final_fn + 0.5))
+            )
         )
 
         p_pre = pre_test_prob / 100.0
@@ -408,6 +431,7 @@ class StatHarness:
             "fp": final_fp,
             "fn": final_fn,
             "tn": final_tn,
+            "used_example_counts": used_example_counts,
             "pre_test_prob": pre_test_prob,
             "sensitivity": sens,
             "specificity": spec,
@@ -932,11 +956,16 @@ class ClinicalAnalystEngine:
                     index_test_col=idx_col,
                     ref_standard_col=ref_col,
                 )
+                matrix_label = (
+                    "2x2 Matrix Counts (Demonstration Example Data)"
+                    if metrics.get("used_example_counts")
+                    else "2x2 Matrix Counts (Derived from Cohort)"
+                )
                 response_md = f"""### 🚀 ดำเนินการวิเคราะห์แนวทางที่ {opt_id} (Diagnostic Accuracy & Fagan Nomogram - STARD 2015)
 
 **สร้างชุดข้อมูลจำลองตามแนวทางที่ {opt_id}:** `{state.file_name}` (n = {len(df_gen):,} ราย)
 - **Index Diagnostic Test:** `{idx_col}` | **Reference Standard:** `{ref_col}`
-- **2x2 Matrix Counts:** TP = `{metrics["tp"]}`, FP = `{metrics["fp"]}`, FN = `{metrics["fn"]}`, TN = `{metrics["tn"]}`
+- **{matrix_label}:** TP = `{metrics["tp"]}`, FP = `{metrics["fp"]}`, FN = `{metrics["fn"]}`, TN = `{metrics["tn"]}`
 
 #### 1. ผลการประเมินความแม่นยำในการวินิจฉัย (Diagnostic Performance Metrics):
 - **Sensitivity (ความไว):** `{metrics["sensitivity"]:.1%}` | **Specificity (ความจำเพาะ):** `{metrics["specificity"]:.1%}`

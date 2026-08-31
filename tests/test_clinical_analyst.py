@@ -84,12 +84,47 @@ def test_stat_harness_diagnostic_explicit_counts():
     assert metrics["fp"] == 20
     assert metrics["fn"] == 10
     assert metrics["tn"] == 90
+    assert metrics["used_example_counts"] is False
     assert round(metrics["sensitivity"], 4) == round(80 / 90, 4)
     assert round(metrics["specificity"], 4) == round(90 / 110, 4)
     assert round(metrics["ppv"], 4) == round(80 / 100, 4)
     assert round(metrics["npv"], 4) == round(90 / 100, 4)
     assert round(metrics["pre_test_prob"], 2) == 45.0
     assert fig is not None
+
+
+def test_stat_harness_diagnostic_fallback_flag():
+    # When no df or explicit counts are provided, used_example_counts should be True
+    _metrics_df, metrics, _fig = StatHarness.run_diagnostic()
+    assert metrics["used_example_counts"] is True
+    assert metrics["tp"] == 85
+    assert metrics["fp"] == 15
+    assert metrics["fn"] == 15
+    assert metrics["tn"] == 185
+
+    # When explicit counts are provided, used_example_counts should be False
+    _metrics_df2, metrics2, _fig2 = StatHarness.run_diagnostic(tp=50, fp=5, fn=5, tn=50)
+    assert metrics2["used_example_counts"] is False
+    assert metrics2["tp"] == 50
+
+
+def test_stat_harness_diagnostic_haldane_anscombe_continuity():
+    # Test degenerate case: Perfect specificity (spec = 1.0, fp = 0)
+    # Haldane-Anscombe correction should prevent LR+ from collapsing to 1.0 (uninformative)
+    _metrics_df, metrics, _fig = StatHarness.run_diagnostic(
+        tp=100, fp=0, fn=10, tn=100, pre_test_prob=50.0
+    )
+    assert metrics["specificity"] == 1.0
+    assert metrics["lr_pos"] > 10.0  # Highly informative positive test
+    assert metrics["post_prob_pos"] > 50.0  # Post-test probability increases
+
+    # Test degenerate case: Perfect sensitivity (sens = 1.0, fn = 0)
+    _metrics_df2, metrics2, _fig2 = StatHarness.run_diagnostic(
+        tp=100, fp=10, fn=0, tn=100, pre_test_prob=50.0
+    )
+    assert metrics2["sensitivity"] == 1.0
+    assert metrics2["lr_neg"] < 0.1  # Highly informative negative test
+    assert metrics2["post_prob_neg"] < 50.0  # Post-test probability decreases
 
 
 def test_stat_harness_binary_rct():
