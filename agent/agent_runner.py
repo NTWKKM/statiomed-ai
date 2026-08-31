@@ -67,14 +67,73 @@ except ImportError:
 
         def run(self, prompt: str) -> str:
             lower_p = prompt.lower()
-            if "pubmed" in lower_p or "pico" in lower_p or "evidence" in lower_p:
-                tool = self.tools.get("pubmed_evidence_search")
-                if tool:
-                    return tool.forward(query=prompt, max_results=3)
-            elif "sample size" in lower_p or "power" in lower_p:
+            if "sample size" in lower_p or "power" in lower_p or "n_total" in lower_p:
                 tool = self.tools.get("sample_size_calculator")
                 if tool:
                     return tool.forward(test_type="two_proportions", p1=0.25, p2=0.15)
+            elif (
+                "survival" in lower_p
+                or "kaplan" in lower_p
+                or "cox" in lower_p
+                or "logrank" in lower_p
+            ):
+                tool = self.tools.get("survival_analysis")
+                if tool:
+                    return tool.forward(time_col="time", event_col="event")
+            elif (
+                "table 1" in lower_p
+                or "baseline characteristics" in lower_p
+                or "table one" in lower_p
+            ):
+                tool = self.tools.get("table_one_baseline")
+                if tool:
+                    return tool.forward()
+            elif "logistic" in lower_p or "odds ratio" in lower_p:
+                tool = self.tools.get("logistic_regression")
+                if tool:
+                    return tool.forward(
+                        outcome_col="outcome", predictor_cols=["treatment", "age"]
+                    )
+            elif (
+                "diagnostic" in lower_p
+                or "sensitivity" in lower_p
+                or "stard" in lower_p
+                or "fagan" in lower_p
+            ):
+                tool = self.tools.get("diagnostic_accuracy")
+                if tool:
+                    return tool.forward(tp=85, fp=15, fn=15, tn=185)
+            elif (
+                "rct" in lower_p
+                or "consort" in lower_p
+                or "randomized" in lower_p
+                or "relative risk" in lower_p
+            ):
+                tool = self.tools.get("binary_rct_analysis")
+                if tool:
+                    return tool.forward(
+                        treatment_col="treatment", outcome_col="outcome"
+                    )
+            elif (
+                "psm" in lower_p
+                or "propensity" in lower_p
+                or "nearest-neighbor" in lower_p
+            ):
+                tool = self.tools.get("propensity_score_matching")
+                if tool:
+                    return tool.forward(
+                        treatment_col="treatment", covariate_cols=["age", "bmi"]
+                    )
+            elif "linear" in lower_p or "ols" in lower_p:
+                tool = self.tools.get("linear_regression")
+                if tool:
+                    return tool.forward(
+                        outcome_col="outcome", predictor_cols=["age", "treatment"]
+                    )
+            elif "pubmed" in lower_p or "pico" in lower_p or "evidence" in lower_p:
+                tool = self.tools.get("pubmed_evidence_search")
+                if tool:
+                    return tool.forward(query=prompt, max_results=3)
             elif "synthetic" in lower_p or "cohort" in lower_p:
                 tool = self.tools.get("synthetic_cohort_generator")
                 if tool:
@@ -287,7 +346,9 @@ def get_model(backend: Optional[str] = None):
 
 
 def create_clinical_agent(
-    backend: Optional[str] = None, tools: Optional[List[Any]] = None
+    backend: Optional[str] = None,
+    tools: Optional[List[Any]] = None,
+    state_df_provider: Optional[Any] = None,
 ) -> ToolCallingAgent:
     """
     Factory function to initialize a ToolCallingAgent with clinical tools and system prompt.
@@ -295,9 +356,29 @@ def create_clinical_agent(
     from agent.tools.tool_pubmed import PubMedEvidenceTool
     from agent.tools.tool_sample_size import SampleSizeTool
     from agent.tools.tool_synthetic_data import SyntheticDataTool
+    from agent.tools.tool_stat_harness import (
+        SurvivalAnalysisTool,
+        BaselineTableOneTool,
+        LogisticRegressionTool,
+        DiagnosticAccuracyTool,
+        BinaryRCTTool,
+        PropensityScoreMatchingTool,
+        LinearRegressionTool,
+    )
 
     if tools is None:
-        tools = [PubMedEvidenceTool(), SampleSizeTool(), SyntheticDataTool()]
+        tools = [
+            PubMedEvidenceTool(),
+            SampleSizeTool(),
+            SyntheticDataTool(),
+            SurvivalAnalysisTool(state_df_provider=state_df_provider),
+            BaselineTableOneTool(state_df_provider=state_df_provider),
+            LogisticRegressionTool(state_df_provider=state_df_provider),
+            DiagnosticAccuracyTool(state_df_provider=state_df_provider),
+            BinaryRCTTool(state_df_provider=state_df_provider),
+            PropensityScoreMatchingTool(state_df_provider=state_df_provider),
+            LinearRegressionTool(state_df_provider=state_df_provider),
+        ]
 
     model = get_model(backend=backend)
     return ToolCallingAgent(

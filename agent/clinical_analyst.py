@@ -20,7 +20,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import scipy.stats as stats
 
-from agent.agent_runner import ClinicalAgentRunner
+from agent.agent_runner import ClinicalAgentRunner, create_clinical_agent
+from agent.critique_engine import CritiqueEngine, CritiqueVerdict
 from agent.tools.tool_pubmed import PubMedEvidenceTool
 from agent.tools.tool_sample_size import SampleSizeTool
 from agent.tools.tool_synthetic_data import SyntheticDataTool
@@ -895,6 +896,7 @@ class ClinicalAnalystEngine:
                     treatment_col=t_col,
                     outcome_col=o_col,
                 )
+                critique = CritiqueEngine.appraise_analysis("rct", df_gen, metrics)
                 response_md = f"""### 🚀 Executing Option {opt_id} (Randomized Controlled Trial - CONSORT 2010)
 
 **Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} patients)
@@ -913,6 +915,9 @@ class ClinicalAnalystEngine:
 - **Fisher's Exact Test:** P-value = **`{metrics["fisher_p"]:.4f}`** (Odds Ratio = `{metrics["fisher_or"]:.3f}`)
 
 {summary_df.to_markdown(index=False)}
+
+---
+{critique.to_markdown()}
 """
                 return response_md, state, fig, df_gen
             elif opt_id == 2 and time_col and event_col:
@@ -929,6 +934,16 @@ class ClinicalAnalystEngine:
                     if isinstance(km_p_val, (int, float))
                     else str(km_p_val)
                 )
+                critique = CritiqueEngine.appraise_analysis(
+                    "survival",
+                    df_gen,
+                    {
+                        "time_col": time_col,
+                        "event_col": event_col,
+                        "covar_cols": covars,
+                        "cox_stats": stats_dict.get("cox_stats", {}),
+                    },
+                )
                 response_md = f"""### 🚀 Executing Option {opt_id} (Kaplan-Meier & Cox Proportional Hazards - STROBE)
 
 **Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} patients)
@@ -941,6 +956,9 @@ class ClinicalAnalystEngine:
 #### 2. Multivariable Cox Proportional Hazards Model:
 - **Confounders Adjusted:** {", ".join([f"`{c}`" for c in covars]) if covars else "None"}
 - **Status:** Cohort saved to session state and Kaplan-Meier plot rendered in the Visual Output panel.
+
+---
+{critique.to_markdown()}
 """
                 return response_md, state, fig, df_gen
             elif opt_id == 3:
@@ -986,6 +1004,9 @@ class ClinicalAnalystEngine:
                     if metrics.get("used_example_counts")
                     else "2x2 Matrix Counts (Derived from Cohort)"
                 )
+                critique = CritiqueEngine.appraise_analysis(
+                    "diagnostic", df_gen, metrics
+                )
                 response_md = f"""### 🚀 Executing Option {opt_id} (Diagnostic Accuracy & Fagan Nomogram - STARD 2015)
 
 **Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} subjects)
@@ -1003,6 +1024,9 @@ class ClinicalAnalystEngine:
 - **Post-Test Probability (Negative Test):** `{metrics["post_prob_neg"]:.1f}%`
 
 {metrics_df.to_markdown(index=False)}
+
+---
+{critique.to_markdown()}
 """
                 return response_md, state, fig, df_gen
             elif opt_id == 4:
@@ -1013,6 +1037,15 @@ class ClinicalAnalystEngine:
                     outcome_col=o_col,
                     predictor_cols=p_cols,
                 )
+                critique = CritiqueEngine.appraise_analysis(
+                    "logistic",
+                    df_gen,
+                    {
+                        "outcome_col": o_col,
+                        "predictor_cols": p_cols,
+                        "coef_df": coef_df,
+                    },
+                )
                 response_md = f"""### 🚀 Executing Option {opt_id} (Clinical Prediction Model - TRIPOD+AI)
 
 **Dataset:** `{state.file_name}` (n = {len(df_gen):,} records)  
@@ -1021,6 +1054,9 @@ class ClinicalAnalystEngine:
 
 #### Odds Ratios & Multivariable Model Summary:
 {coef_df.to_markdown(index=False)}
+
+---
+{critique.to_markdown()}
 """
                 return response_md, state, fig, df_gen
             elif opt_id == 5:
@@ -1052,6 +1088,7 @@ class ClinicalAnalystEngine:
 {stats_dict["matched_coef_df"].to_markdown(index=False)}
 """
 
+                critique = CritiqueEngine.appraise_analysis("psm", df_gen, stats_dict)
                 response_md = f"""### 🚀 Executing Option {opt_id} (Propensity Score Matching & Causal Inference)
 
 **Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} records)
@@ -1066,6 +1103,9 @@ class ClinicalAnalystEngine:
 #### 2. Covariate Balance Assessment (Love Plot & SMD):
 {balance_df.to_markdown(index=False) if not balance_df.empty else "No covariate balance table available."}
 {matched_reg_md}
+
+---
+{critique.to_markdown()}
 """
                 return response_md, state, fig, df_gen
             else:
@@ -1411,6 +1451,16 @@ Dataset saved to session and ready for downstream analysis.
                 c_idx = stats_dict.get("cox_stats", {}).get(
                     "Concordance Index (C-index)", "N/A"
                 )
+                critique = CritiqueEngine.appraise_analysis(
+                    "survival",
+                    df,
+                    {
+                        "time_col": time_col,
+                        "event_col": event_col,
+                        "covar_cols": covariates,
+                        "cox_stats": stats_dict.get("cox_stats", {}),
+                    },
+                )
 
                 response_md = f"""### ⏱️ Survival Analysis Execution
 
@@ -1426,6 +1476,9 @@ Dataset saved to session and ready for downstream analysis.
 - **Covariates Adjusted:** {covar_str}
 
 *(Kaplan-Meier Survival Function has been rendered in the Visual Output window)*
+
+---
+{critique.to_markdown()}
 """
                 return response_md, state, fig, df
 
@@ -1459,12 +1512,24 @@ Dataset saved to session and ready for downstream analysis.
                         predictor_cols=covariates or cols[:4],
                     )
                     table_md = coef_df.to_markdown(index=False)
+                    critique = CritiqueEngine.appraise_analysis(
+                        "logistic",
+                        df,
+                        {
+                            "outcome_col": target_outcome,
+                            "predictor_cols": covariates or cols[:4],
+                            "coef_df": coef_df,
+                        },
+                    )
                     response_md = f"""### 🎯 Multivariable Logistic Regression
 
 **Dependent Outcome (Y):** `{target_outcome}` (Binary)  
 **McFadden Pseudo-$R^2$:** `{metrics.get("mcfadden", 0.0):.4f}` | **AIC:** `{metrics.get("aic", 0.0):.1f}`
 
 {table_md}
+
+---
+{critique.to_markdown()}
 """
                     return response_md, state, fig, df
                 else:
