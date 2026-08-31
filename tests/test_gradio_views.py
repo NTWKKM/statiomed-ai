@@ -199,3 +199,16 @@ def test_meta_analysis_view():
     assert funnel_fig is not None
     assert "Pooled" in summary_html
     assert not effects_df.empty
+
+
+def test_app_theme_compatibility():
+    """Verify that app theme compares cleanly against all Gradio built-in themes."""
+    from gradio import utils
+    from app import theme
+
+    theme_dict = theme.to_dict()
+    assert theme_dict is not None
+    for name, built_in_theme in utils.BUILT_IN_THEMES.items():
+        # Ensure comparison does not raise AttributeError on font string comparisons
+        match = theme_dict == built_in_theme.to_dict()
+        assert isinstance(match, bool)

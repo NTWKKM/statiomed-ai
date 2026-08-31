@@ -53,17 +53,17 @@ theme = gr.themes.Soft(
     secondary_hue="slate",
     neutral_hue="slate",
     font=[
-        gr.themes.GoogleFont("Inter"),
-        gr.themes.Font("ui-sans-serif"),
-        gr.themes.Font("-apple-system"),
-        gr.themes.Font("system-ui"),
-        gr.themes.Font("sans-serif"),
+        "Inter",
+        "ui-sans-serif",
+        "-apple-system",
+        "system-ui",
+        "sans-serif",
     ],
     font_mono=[
-        gr.themes.GoogleFont("JetBrains Mono"),
-        gr.themes.Font("ui-monospace"),
-        gr.themes.Font("Consolas"),
-        gr.themes.Font("monospace"),
+        "JetBrains Mono",
+        "ui-monospace",
+        "Consolas",
+        "monospace",
     ],
 ).set(
     body_background_fill="#f8fafc",
@@ -88,6 +88,8 @@ theme = gr.themes.Soft(
 )
 
 custom_css = """
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 :root, body, html {
     color-scheme: light !important;
     background-color: #f8fafc !important;
