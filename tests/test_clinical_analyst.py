@@ -426,6 +426,57 @@ def test_coerce_to_binary_series_extended():
     res_ambig = _coerce_to_binary_series(s_ambig, positive_val="Cohort_B")
     assert list(res_ambig) == [0, 1, 0]
 
+    # Negative tokens precedence (e.g., "non-event" vs "event")
+    s_event = pd.Series(["non-event", "event", "non-event", "event"])
+    res_event = _coerce_to_binary_series(s_event)
+    assert list(res_event) == [0, 1, 0, 1]
+
+    # Single-value recognized tokens
+    s_single_pos = pd.Series(["Dead", "Dead"])
+    assert list(_coerce_to_binary_series(s_single_pos)) == [1, 1]
+    s_single_neg = pd.Series(["non-event", "non-event"])
+    assert list(_coerce_to_binary_series(s_single_neg)) == [0, 0]
+
+    # Unrecognized single or multi-value categories without positive_val must raise ValueError
+    s_single_unrecognized = pd.Series(["Unknown", "Unknown"])
+    with pytest.raises(
+        ValueError,
+        match="Binary outcome column contains unrecognized category values",
+    ):
+        _coerce_to_binary_series(s_single_unrecognized)
+
+    s_multi_unrecognized = pd.Series(["Alive", "Dead", "Pending"])
+    with pytest.raises(
+        ValueError,
+        match="Binary outcome column contains unrecognized category values",
+    ):
+        _coerce_to_binary_series(s_multi_unrecognized)
+
+
+def test_extract_positive_val_from_message_quoted_and_spaces():
+    from agent.clinical_analyst import _extract_positive_val_from_message
+
+    assert (
+        _extract_positive_val_from_message(
+            'Run survival with positive_val="Disease Present"'
+        )
+        == "Disease Present"
+    )
+    assert (
+        _extract_positive_val_from_message(
+            "Run survival with positive_val='Heart Failure'"
+        )
+        == "Heart Failure"
+    )
+    assert (
+        _extract_positive_val_from_message("event: 'Acute Kidney Injury'")
+        == "Acute Kidney Injury"
+    )
+    assert _extract_positive_val_from_message("pos_val: 1") == 1
+    assert _extract_positive_val_from_message("event_val=Dead") == "Dead"
+    assert _extract_positive_val_from_message("positive_val=1.5") == 1.5
+    assert _extract_positive_val_from_message("positive_val='1'") == 1
+
 
 def test_run_survival_with_non_standard_binary_event():
     np.random.seed(42)

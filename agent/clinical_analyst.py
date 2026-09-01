@@ -43,12 +43,12 @@ def _extract_positive_val_from_message(msg: str) -> Any | None:
     if not msg:
         return None
     match = re.search(
-        r"(?:positive_val|pos_val|positive_value|event_val|positive|event)\s*[:=]\s*['\"]?([^'\"\s,;]+)['\"]?",
+        r"(?:positive_val|pos_val|positive_value|event_val|positive|event)\s*[:=]\s*(?:['\"]([^'\"]+)['\"]|([^'\"\s,;]+))",
         msg,
         re.IGNORECASE,
     )
     if match:
-        raw = match.group(1).strip()
+        raw = (match.group(1) or match.group(2)).strip()
         if re.match(r"^-?\d+$", raw):
             return int(raw)
         try:
@@ -156,64 +156,93 @@ def _coerce_to_binary_series(series: pd.Series, positive_val: Any = None) -> pd.
         "intact",
         "placebo",
         "healthy",
+        "standard",
+        "standard of care",
+        "soc",
+        "sham",
+        "comparator",
+        "conventional",
     }
+
+    def _classify_token(v: str) -> str | None:
+        if v in neg_tokens:
+            return "neg"
+        if v in pos_tokens:
+            return "pos"
+        if (
+            v.startswith("non-")
+            or v.startswith("non_")
+            or v.startswith("no ")
+            or v.startswith("not ")
+            or "non-event" in v
+            or "non_event" in v
+            or "nonevent" in v
+            or "disease-free" in v
+        ):
+            return "neg"
+        if any(
+            tok in v
+            for tok in [
+                "pos",
+                "true",
+                "abnormal",
+                "dead",
+                "death",
+                "deceased",
+                "event",
+                "relapse",
+                "recurrence",
+                "failure",
+                "diseased",
+                "reactive",
+                "stroke",
+                "mortality",
+                "case",
+                "present",
+                "treated",
+                "treatment",
+                "intervention",
+                "immunotherapy",
+                "experimental",
+                "investigational",
+                "active",
+            ]
+        ):
+            return "pos"
+        if any(
+            tok in v
+            for tok in [
+                "neg",
+                "false",
+                "normal",
+                "alive",
+                "control",
+                "placebo",
+                "survive",
+                "cured",
+                "intact",
+                "healthy",
+                "absent",
+                "standard",
+                "conventional",
+                "sham",
+                "comparator",
+            ]
+        ):
+            return "neg"
+        return None
 
     # If exactly 2 distinct string values present, evaluate against token dictionaries
     unique_s = sorted(s_str.unique())
     if len(unique_s) == 2:
         val0, val1 = unique_s[0], unique_s[1]
-        val0_pos = val0 in pos_tokens or any(
-            t in val0
-            for t in [
-                "pos",
-                "true",
-                "abnormal",
-                "yes",
-                "dead",
-                "death",
-                "event",
-                "relapse",
-            ]
-        )
-        val1_pos = val1 in pos_tokens or any(
-            t in val1
-            for t in [
-                "pos",
-                "true",
-                "abnormal",
-                "yes",
-                "dead",
-                "death",
-                "event",
-                "relapse",
-            ]
-        )
-        val0_neg = val0 in neg_tokens or any(
-            t in val0
-            for t in [
-                "neg",
-                "false",
-                "normal",
-                "no",
-                "alive",
-                "control",
-                "placebo",
-                "survive",
-            ]
-        )
-        val1_neg = val1 in neg_tokens or any(
-            t in val1
-            for t in [
-                "neg",
-                "false",
-                "normal",
-                "no",
-                "alive",
-                "control",
-                "placebo",
-                "survive",
-            ]
-        )
+        c0 = _classify_token(val0)
+        c1 = _classify_token(val1)
+
+        val0_pos = c0 == "pos"
+        val1_pos = c1 == "pos"
+        val0_neg = c0 == "neg"
+        val1_neg = c1 == "neg"
 
         if val1_pos and (val0_neg or not val0_pos):
             res.loc[non_null.index] = (s_str == val1).astype(int)
@@ -233,25 +262,25 @@ def _coerce_to_binary_series(series: pd.Series, positive_val: Any = None) -> pd.
             "Please specify an explicit positive-event value (positive_val) or map values to 0/1."
         )
 
-    def _map_val(v: str) -> int:
-        if v in pos_tokens or any(
-            tok in v
-            for tok in [
-                "pos",
-                "true",
-                "abnormal",
-                "yes",
-                "dead",
-                "death",
-                "event",
-                "relapse",
-                "recurrence",
-            ]
-        ):
-            return 1
-        return 0
+    mapped_vals = {}
+    unrecognized = []
+    for u in unique_s:
+        c = _classify_token(u)
+        if c == "pos":
+            mapped_vals[u] = 1
+        elif c == "neg":
+            mapped_vals[u] = 0
+        else:
+            unrecognized.append(u)
 
-    res.loc[non_null.index] = s_str.apply(_map_val).astype(int)
+    if unrecognized:
+        raise ValueError(
+            f"Binary outcome column contains unrecognized category values {unrecognized}. "
+            "Cannot unambiguously determine positive event. "
+            "Please specify an explicit positive-event value (positive_val) or map values to 0/1."
+        )
+
+    res.loc[non_null.index] = s_str.map(mapped_vals).astype(int)
     return res
 
 
@@ -1227,12 +1256,25 @@ class ClinicalAnalystEngine:
                     covar_cols=covars,
                     positive_val=extracted_pos_val,
                 )
-                km_p_val = stats_dict.get("km_stats", {}).get("p_value", "N/A")
+                km_stats = stats_dict.get("km_stats", {})
+                km_p_val = km_stats.get("p_value", "N/A")
                 km_p_val_str = (
                     f"{km_p_val:.4f}"
                     if isinstance(km_p_val, (int, float))
                     else str(km_p_val)
                 )
+                km_events = km_stats.get("km_events")
+                km_censored = km_stats.get("km_censored")
+                if km_events is not None and km_censored is not None:
+                    events_str = f"`{km_events}` out of `{km_events + km_censored}`"
+                else:
+                    raw_ev = (
+                        df_gen[event_col].sum()
+                        if event_col in df_gen.columns
+                        and pd.api.types.is_numeric_dtype(df_gen[event_col])
+                        else "N/A"
+                    )
+                    events_str = f"`{raw_ev}` out of `{len(df_gen)}`"
                 critique = CritiqueEngine.appraise_analysis(
                     "survival",
                     df_gen,
@@ -1255,7 +1297,7 @@ class ClinicalAnalystEngine:
 #### 1. Kaplan-Meier Survival Analysis & Log-Rank Test:
 - **Duration / Time:** `{time_col}` | **Event / Status:** `{event_col}`
 - **Log-Rank P-value:** `{km_p_val_str}`
-- **Total Observed Events:** `{df_gen[event_col].sum() if event_col in df_gen.columns else "N/A"}` out of `{len(df_gen)}` subjects
+- **Total Observed Events:** {events_str} subjects
 
 #### 2. Multivariable Cox Proportional Hazards Model:
 - **Confounders Adjusted:** {", ".join([f"`{c}`" for c in covars]) if covars else "None"}
@@ -1569,10 +1611,23 @@ Dataset saved to session and ready for downstream analysis.
                 state.last_critique_md = critique.to_markdown()
                 critique_md = f"\n---\n{critique.to_markdown()}"
 
-            km_p_val = stats_dict.get("km_stats", {}).get("p_value", "N/A")
+            km_stats = stats_dict.get("km_stats", {})
+            km_p_val = km_stats.get("p_value", "N/A")
             km_p_val_str = (
                 f"{km_p_val:.4f}" if isinstance(km_p_val, float) else str(km_p_val)
             )
+            km_events = km_stats.get("km_events")
+            if km_events is not None:
+                events_display = f"`{km_events}` events"
+            else:
+                raw_ev = (
+                    df_gen[event_col].sum()
+                    if event_col
+                    and event_col in df_gen.columns
+                    and pd.api.types.is_numeric_dtype(df_gen[event_col])
+                    else "N/A"
+                )
+                events_display = f"`{raw_ev}` events"
 
             pico = meta.get("pico", {})
             response_md = f"""### 🧬 Synthetic Clinical Cohort Generated Successfully
@@ -1590,7 +1645,7 @@ Dataset saved to session and ready for downstream analysis.
 #### 🚀 Immediate Statistical Execution:
 1. **Kaplan-Meier Survival Analysis:** Fit survival curves stratified by treatment arm (`{treat_col}`)
    - **Log-Rank Test P-value:** `{km_p_val_str}`
-   - **Total Events:** `{df_gen[event_col].sum() if event_col else "N/A"}` events
+   - **Total Events:** {events_display}
 2. **Session State Synced:** You can now switch to **📊 Data Profiler**, **📈 Regression**, or **👥 Table 1 & Matching** tabs for further in-depth analysis.
 {critique_md}
 """
@@ -1841,11 +1896,24 @@ Dataset saved to session and ready for downstream analysis.
                     covar_cols=covariates,
                     positive_val=extracted_pos_val,
                 )
-                p_val = stats_dict.get("km_stats", {}).get("p_value", "N/A")
+                km_stats = stats_dict.get("km_stats", {})
+                p_val = km_stats.get("p_value", "N/A")
                 p_val_str = f"{p_val:.4f}" if isinstance(p_val, float) else str(p_val)
                 c_idx = stats_dict.get("cox_stats", {}).get(
                     "Concordance Index (C-index)", "N/A"
                 )
+                km_events = km_stats.get("km_events")
+                km_censored = km_stats.get("km_censored")
+                if km_events is not None and km_censored is not None:
+                    events_display = f"`{km_events}` out of `{km_events + km_censored}`"
+                else:
+                    raw_ev = (
+                        df[event_col].sum()
+                        if event_col in df.columns
+                        and pd.api.types.is_numeric_dtype(df[event_col])
+                        else "N/A"
+                    )
+                    events_display = f"`{raw_ev}` out of `{len(df)}`"
                 critique = CritiqueEngine.appraise_analysis(
                     "survival",
                     df,
@@ -1869,7 +1937,7 @@ Dataset saved to session and ready for downstream analysis.
 
 #### 1. Kaplan-Meier & Log-Rank Test:
 - **Log-Rank P-value:** **`{p_val_str}`**
-- **Total Events:** `{df[event_col].sum()}` out of `{len(df)}` subjects
+- **Total Events:** {events_display} subjects
 
 #### 2. Multivariable Cox Proportional Hazards Model:
 - **Concordance Index (C-index):** `{c_idx}`

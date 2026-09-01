@@ -95,11 +95,23 @@ class SurvivalAnalysisTool(Tool):
             covar_cols=covar_cols,
             positive_val=positive_val,
         )
-        p_val = stats_dict.get("km_stats", {}).get("p_value", "N/A")
+        km_stats = stats_dict.get("km_stats", {})
+        p_val = km_stats.get("p_value", "N/A")
         p_val_str = f"{p_val:.4f}" if isinstance(p_val, (int, float)) else str(p_val)
 
-        events_count = int(df[event_col].sum()) if event_col in df.columns else 0
-        total_n = len(df)
+        km_events = km_stats.get("km_events")
+        km_censored = km_stats.get("km_censored")
+        if km_events is not None and km_censored is not None:
+            events_count = int(km_events)
+            total_n = int(km_events + km_censored)
+        else:
+            events_count = (
+                int(df[event_col].sum())
+                if event_col in df.columns
+                and pd.api.types.is_numeric_dtype(df[event_col])
+                else 0
+            )
+            total_n = len(df)
 
         report = [
             "### ⏱️ Survival Analysis & Cox Proportional Hazards (STROBE Compliant)",

@@ -47,6 +47,43 @@ def test_survival_analysis_tool(sample_clinical_df):
     assert fig is not None
     assert isinstance(summary_df, pd.DataFrame)
     assert "km_stats" in stats_dict
+    assert "Observed Events:" in text_out
+
+
+def test_survival_analysis_tool_with_string_events():
+    tool = SurvivalAnalysisTool()
+    n = 50
+    df = pd.DataFrame(
+        {
+            "time": [10.0, 20.0] * (n // 2),
+            "status_str": ["Alive", "Dead"] * (n // 2),
+            "treatment": [0, 1] * (n // 2),
+        }
+    )
+    text_out, fig, summary_df, stats_dict = tool.run_with_dataframe(
+        df=df,
+        time_col="time",
+        event_col="status_str",
+        group_col="treatment",
+    )
+    assert "**Observed Events:** 25 / 50 (50.0%)" in text_out
+
+    # With non-standard numeric encoding and positive_val
+    df_num = pd.DataFrame(
+        {
+            "time": [10.0, 20.0] * (n // 2),
+            "status_code": [1, 2] * (n // 2),
+            "treatment": [0, 1] * (n // 2),
+        }
+    )
+    text_out2, _, _, _ = tool.run_with_dataframe(
+        df=df_num,
+        time_col="time",
+        event_col="status_code",
+        group_col="treatment",
+        positive_val=2,
+    )
+    assert "**Observed Events:** 25 / 50 (50.0%)" in text_out2
 
 
 def test_baseline_table_one_tool(sample_clinical_df):
