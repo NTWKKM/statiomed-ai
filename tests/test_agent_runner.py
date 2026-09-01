@@ -123,6 +123,9 @@ def test_tool_routing_non_canonical_columns():
     res_psm = execute_agent_turn(agent, "Run propensity score matching psm")
     assert "Propensity Score Matching" in res_psm
     assert "`study_arm`" in res_psm
+    assert "`aki_endpoint`" not in res_psm
+    assert "`death_status`" not in res_psm
+    assert "`follow_up_days`" not in res_psm
     assert "Automated Clinical Critique & Appraisal" in res_psm
 
     # 5. Linear regression (OLS) with non-canonical columns: assert exact continuous outcome & appraisal
@@ -269,3 +272,32 @@ def test_tool_routing_rejects_unresolved_columns_without_positional_fallbacks():
         "Error: Could not resolve a valid continuous/numeric outcome column"
         in res_linear_str
     )
+
+
+def test_psm_covariates_exclude_endpoints_and_outcomes():
+    import pandas as pd
+
+    from agent.agent_runner import _resolve_psm_columns
+
+    df = pd.DataFrame(
+        {
+            "treatment": [1, 0, 1, 0] * 10,
+            "patient_id": [f"P_{i}" for i in range(40)],
+            "age": [50, 60, 55, 65] * 10,
+            "bmi": [22.5, 27.1, 24.0, 29.3] * 10,
+            "creatinine": [1.1, 0.9, 1.4, 0.8] * 10,
+            "aki_endpoint": [1, 0, 0, 1] * 10,
+            "death_status": [0, 1, 0, 0] * 10,
+            "follow_up_days": [100, 200, 150, 300] * 10,
+        }
+    )
+
+    resolved, err = _resolve_psm_columns(df, "Run propensity score matching")
+    assert err is None
+    assert resolved is not None
+    assert resolved["treatment_col"] == "treatment"
+    assert "aki_endpoint" not in resolved["covariate_cols"]
+    assert "death_status" not in resolved["covariate_cols"]
+    assert "follow_up_days" not in resolved["covariate_cols"]
+    assert "patient_id" not in resolved["covariate_cols"]
+    assert set(resolved["covariate_cols"]).issubset({"age", "bmi", "creatinine"})

@@ -361,3 +361,103 @@ def test_synthetic_cohort_and_proposal_inspector_sync():
     assert new_state3.last_analysis_type == "logistic"
     assert new_state3.last_critique_md is not None
     assert "Automated Clinical Critique & Appraisal" in resp3
+
+
+def test_coerce_to_binary_series_extended():
+    from agent.clinical_analyst import _coerce_to_binary_series
+
+    # Numeric 1/2 coding (common in medical registries)
+    s1 = pd.Series([1, 2, 1, 2, 2])
+    res1 = _coerce_to_binary_series(s1)
+    assert list(res1) == [0, 1, 0, 1, 1]
+
+    # Negative/Positive numeric
+    s2 = pd.Series([-1, 1, -1, 1])
+    res2 = _coerce_to_binary_series(s2)
+    assert list(res2) == [0, 1, 0, 1]
+
+    # Standard 0/1
+    s3 = pd.Series([0, 1, 0, 1])
+    res3 = _coerce_to_binary_series(s3)
+    assert list(res3) == [0, 1, 0, 1]
+
+    # Clinical string tokens: Dead / Alive
+    s_dead = pd.Series(["Dead", "Alive", "Dead", "Alive"])
+    res_dead = _coerce_to_binary_series(s_dead)
+    assert list(res_dead) == [1, 0, 1, 0]
+
+    # Clinical string tokens: Death / Survived
+    s_death = pd.Series(["Death", "Survived", "Death"])
+    res_death = _coerce_to_binary_series(s_death)
+    assert list(res_death) == [1, 0, 1]
+
+    # Clinical string tokens: Case / Control
+    s_case = pd.Series(["Control", "Case", "Control"])
+    res_case = _coerce_to_binary_series(s_case)
+    assert list(res_case) == [0, 1, 0]
+
+
+def test_run_survival_with_non_standard_binary_event():
+    np.random.seed(42)
+    n = 60
+    # event_col encoded as 1 (censored/alive) and 2 (dead)
+    df = pd.DataFrame(
+        {
+            "time": np.random.uniform(10, 100, n),
+            "status": [1, 2] * (n // 2),
+            "treatment": [0, 1] * (n // 2),
+            "age": np.random.normal(55, 8, n),
+        }
+    )
+
+    fig, summary, meta = StatHarness.run_survival(
+        df=df,
+        time_col="time",
+        event_col="status",
+        group_col="treatment",
+        covar_cols=["age"],
+    )
+
+    assert meta["fitted_events"] == 30
+    assert meta["fitted_non_events"] == 30
+    assert meta["fitted_non_events"] >= 0
+
+
+def test_run_logistic_with_string_outcome():
+    np.random.seed(42)
+    n = 80
+    df = pd.DataFrame(
+        {
+            "mortality": ["Alive", "Dead"] * (n // 2),
+            "age": np.random.normal(60, 10, n),
+            "biomarker": np.random.normal(5, 2, n),
+        }
+    )
+
+    coef_df, metrics, fig = StatHarness.run_logistic(
+        df=df,
+        outcome_col="mortality",
+        predictor_cols=["age", "biomarker"],
+    )
+
+    assert metrics["fitted_events"] == 40
+    assert metrics["fitted_non_events"] == 40
+    assert metrics["n_clean"] == 80
+
+
+def test_app_state_file_size_updated_on_ingest(tmp_path):
+    # Create temp CSV file
+    csv_file = tmp_path / "test_upload.csv"
+    csv_file.write_text("id,age,death\n1,50,0\n2,60,1\n3,70,0\n")
+    expected_size = csv_file.stat().st_size
+
+    state = AppState()
+    _resp, new_state, _fig, _df = ClinicalAnalystEngine.process_turn(
+        user_message="Analyze uploaded dataset",
+        file_paths=[str(csv_file)],
+        state=state,
+    )
+
+    assert new_state.file_name == "test_upload.csv"
+    assert new_state.file_size_bytes == expected_size
+    assert new_state.file_size_bytes > 0

@@ -72,6 +72,50 @@ def _is_identifier_column(col_name: str) -> bool:
     return any(t in terms for t in raw_tokens)
 
 
+def _is_outcome_or_endpoint_column(col_name: str) -> bool:
+    c_lower = col_name.lower()
+    tokens = set(re.split(r"[^a-z0-9]+", c_lower))
+    terms = {
+        "endpoint",
+        "outcome",
+        "death",
+        "status",
+        "event",
+        "recurrence",
+        "response",
+        "target",
+        "mortality",
+        "y",
+        "followup",
+        "follow_up",
+        "duration",
+        "time",
+        "days",
+        "months",
+        "years",
+        "surv_time",
+        "os_months",
+        "pfs_days",
+    }
+    if any(t in terms for t in tokens):
+        return True
+    raw_tokens = set(re.split(r"[^\w]+", c_lower))
+    if any(t in terms for t in raw_tokens):
+        return True
+    return any(
+        k in c_lower
+        for k in [
+            "endpoint",
+            "outcome",
+            "death",
+            "mortality",
+            "follow_up",
+            "followup",
+            "surv_time",
+        ]
+    )
+
+
 def _is_binary_column(df: pd.DataFrame, col_name: str) -> bool:
     if col_name not in df.columns:
         return False
@@ -380,7 +424,13 @@ def _resolve_psm_columns(
             "Error: Could not resolve a valid binary treatment indicator column in active dataset for PSM. "
             "Please provide a binary treatment variable."
         )
-    covars = [c for c in cols if c != t_col and not _is_identifier_column(c)][:4]
+    covars = [
+        c
+        for c in cols
+        if c != t_col
+        and not _is_identifier_column(c)
+        and not _is_outcome_or_endpoint_column(c)
+    ][:4]
     if not covars:
         return None, "Error: No covariate columns available in active dataset for PSM."
 

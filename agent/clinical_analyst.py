@@ -43,16 +43,24 @@ def _coerce_to_binary_series(series: pd.Series) -> pd.Series:
     if pd.api.types.is_bool_dtype(series):
         return series.astype(int)
     if pd.api.types.is_numeric_dtype(series):
-        unique_vals = set(series.dropna().unique())
-        if unique_vals.issubset({0, 1}):
+        clean_num = series.dropna()
+        unique_vals = sorted(clean_num.unique())
+        if set(unique_vals).issubset({0, 1}):
             return series.astype(int)
+        if len(unique_vals) == 2:
+            return (series == unique_vals[1]).astype(int)
+        if len(unique_vals) == 1:
+            return pd.Series(1 if unique_vals[0] > 0 else 0, index=series.index)
         return (series > 0).astype(int)
-    # String / categorical mapping
+
+    # String / categorical / object mapping
     s_str = series.astype(str).str.strip().str.lower()
     pos_tokens = {
         "1",
+        "1.0",
         "true",
         "yes",
+        "y",
         "positive",
         "pos",
         "case",
@@ -61,15 +69,126 @@ def _coerce_to_binary_series(series: pd.Series) -> pd.Series:
         "intervention",
         "diseased",
         "reactive",
+        "dead",
+        "death",
+        "deceased",
+        "event",
+        "failure",
+        "relapse",
+        "recurrence",
+        "aki",
+        "stroke",
+        "mi",
+        "mortality",
+        "treated",
     }
-    return s_str.apply(
-        lambda v: 1
-        if (
-            v in pos_tokens
-            or any(tok in v for tok in ["pos", "true", "abnormal", "yes"])
+    neg_tokens = {
+        "0",
+        "0.0",
+        "false",
+        "no",
+        "n",
+        "negative",
+        "neg",
+        "control",
+        "absent",
+        "normal",
+        "alive",
+        "survived",
+        "none",
+        "non-event",
+        "cured",
+        "intact",
+        "placebo",
+        "healthy",
+    }
+
+    # If exactly 2 distinct string values present, evaluate against token dictionaries
+    unique_s = sorted(s_str.dropna().unique())
+    if len(unique_s) == 2:
+        val0, val1 = unique_s[0], unique_s[1]
+        val0_pos = val0 in pos_tokens or any(
+            t in val0
+            for t in [
+                "pos",
+                "true",
+                "abnormal",
+                "yes",
+                "dead",
+                "death",
+                "event",
+                "relapse",
+            ]
         )
-        else 0
-    )
+        val1_pos = val1 in pos_tokens or any(
+            t in val1
+            for t in [
+                "pos",
+                "true",
+                "abnormal",
+                "yes",
+                "dead",
+                "death",
+                "event",
+                "relapse",
+            ]
+        )
+        val0_neg = val0 in neg_tokens or any(
+            t in val0
+            for t in [
+                "neg",
+                "false",
+                "normal",
+                "no",
+                "alive",
+                "control",
+                "placebo",
+                "survive",
+            ]
+        )
+        val1_neg = val1 in neg_tokens or any(
+            t in val1
+            for t in [
+                "neg",
+                "false",
+                "normal",
+                "no",
+                "alive",
+                "control",
+                "placebo",
+                "survive",
+            ]
+        )
+
+        if val1_pos and (val0_neg or not val0_pos):
+            return (s_str == val1).astype(int)
+        if val0_pos and (val1_neg or not val1_pos):
+            return (s_str == val0).astype(int)
+        if val0_neg and not val1_neg:
+            return (s_str != val0).astype(int)
+        if val1_neg and not val0_neg:
+            return (s_str != val1).astype(int)
+        return (s_str == val1).astype(int)
+
+    def _map_val(v: str) -> int:
+        if v in pos_tokens or any(
+            tok in v
+            for tok in [
+                "pos",
+                "true",
+                "abnormal",
+                "yes",
+                "dead",
+                "death",
+                "event",
+                "relapse",
+                "recurrence",
+            ]
+        ):
+            return 1
+        return 0
+
+    return s_str.apply(_map_val)
 
 
 @dataclass
@@ -151,13 +270,14 @@ class StatHarness:
                     and not clean_data.empty
                     and event_col in clean_data.columns
                 ):
-                    fitted_events = int(clean_data[event_col].sum())
-                    fitted_non_events = len(clean_data) - fitted_events
+                    event_bin = _coerce_to_binary_series(clean_data[event_col])
+                    fitted_events = int((event_bin == 1).sum())
+                    fitted_non_events = int((event_bin == 0).sum())
                 elif "Number of Events" in cox_stats:
                     try:
                         fitted_events = int(cox_stats["Number of Events"])
                         n_obs = int(cox_stats.get("Number of Observations", len(df)))
-                        fitted_non_events = n_obs - fitted_events
+                        fitted_non_events = max(0, n_obs - fitted_events)
                     except (ValueError, TypeError):
                         pass
                 if cph is not None and hasattr(cph, "compute_residuals"):
@@ -200,11 +320,12 @@ class StatHarness:
     ) -> tuple[pd.DataFrame, dict[str, Any], go.Figure]:
         """Fits binary logistic regression with Odds Ratios and 95% CIs."""
         clean_cols = [outcome_col] + [c for c in predictor_cols if c in df.columns]
-        df_clean = df[clean_cols].dropna()
+        df_clean = df[clean_cols].dropna().copy()
 
         clean_y = _coerce_to_binary_series(df_clean[outcome_col])
         fitted_events = int((clean_y == 1).sum())
         fitted_non_events = int((clean_y == 0).sum())
+        df_clean[outcome_col] = clean_y
 
         html_table, or_results, status, metrics = logic.run_logistic_regression(
             df=df_clean, outcome_col=outcome_col, covariate_cols=predictor_cols
@@ -876,6 +997,7 @@ class ClinicalAnalystEngine:
                     df = load_data_robust(p)
                     state.df = df
                     state.file_name = p.name
+                    state.file_size_bytes = p.stat().st_size if p.exists() else 0
                     state.var_meta = {}
                     state.df_matched = None
                     state.is_matched = False
@@ -995,6 +1117,8 @@ class ClinicalAnalystEngine:
                         "event_col": event_col,
                         "covar_cols": covars,
                         "cox_stats": stats_dict.get("cox_stats", {}),
+                        "fitted_events": stats_dict.get("fitted_events"),
+                        "fitted_non_events": stats_dict.get("fitted_non_events"),
                     },
                 )
                 state.last_analysis_type = "survival"
@@ -1596,6 +1720,8 @@ Dataset saved to session and ready for downstream analysis.
                         "event_col": event_col,
                         "covar_cols": covariates,
                         "cox_stats": stats_dict.get("cox_stats", {}),
+                        "fitted_events": stats_dict.get("fitted_events"),
+                        "fitted_non_events": stats_dict.get("fitted_non_events"),
                     },
                 )
                 state.last_analysis_type = "survival"
