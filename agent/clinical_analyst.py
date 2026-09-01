@@ -38,36 +38,66 @@ from utils.visualizations import plot_missing_pattern
 logger = get_logger(__name__)
 
 
+def _extract_positive_val_from_message(msg: str) -> Any | None:
+    """Extracts explicit positive value parameter from user messages."""
+    if not msg:
+        return None
+    match = re.search(
+        r"(?:positive_val|pos_val|positive_value|event_val|positive|event)\s*[:=]\s*['\"]?([^'\"\s,;]+)['\"]?",
+        msg,
+        re.IGNORECASE,
+    )
+    if match:
+        raw = match.group(1).strip()
+        if re.match(r"^-?\d+$", raw):
+            return int(raw)
+        try:
+            return float(raw)
+        except ValueError:
+            return raw
+    return None
+
+
 def _coerce_to_binary_series(series: pd.Series, positive_val: Any = None) -> pd.Series:
     """Coerces boolean, numeric, or string clinical labels to binary 0/1 integers.
 
     Clinical Safety Rules:
+    - Preserves missing source values as null in a nullable integer series (Int64).
     - Explicit 0/1 numeric and boolean values are preserved automatically.
-    - If positive_val is specified, matching values are mapped to 1 and other non-null values to 0.
+    - If positive_val is specified, matching non-null values are mapped to 1 and other non-null values to 0.
     - Other numeric two-value series (e.g., {1, 2} or {-1, 1}) are NOT automatically inferred by numeric
       ordering; an explicit positive_val is required, or a ValueError is raised.
     - Unambiguous clinical string pairs (e.g. Alive/Dead, Control/Case) are mapped to 0/1; ambiguous pairs require positive_val.
     """
+    res = pd.Series(index=series.index, dtype="Int64")
+    non_null = series.dropna()
+    if non_null.empty:
+        return res
+
     if positive_val is not None:
         if pd.api.types.is_numeric_dtype(series) and isinstance(
             positive_val, (int, float, np.number)
         ):
-            return (series == positive_val).astype(int)
-        s_str = series.astype(str).str.strip().str.lower()
+            res.loc[non_null.index] = (non_null == positive_val).astype(int)
+            return res
+        s_str = non_null.astype(str).str.strip().str.lower()
         pos_str = str(positive_val).strip().lower()
-        return (s_str == pos_str).astype(int)
+        res.loc[non_null.index] = (s_str == pos_str).astype(int)
+        return res
 
     if pd.api.types.is_bool_dtype(series):
-        return series.astype(int)
+        res.loc[non_null.index] = non_null.astype(int)
+        return res
 
     if pd.api.types.is_numeric_dtype(series):
-        clean_num = series.dropna()
-        unique_vals = sorted(clean_num.unique())
+        unique_vals = sorted(non_null.unique())
         if set(unique_vals).issubset({0, 1}):
-            return series.astype(int)
+            res.loc[non_null.index] = non_null.astype(int)
+            return res
         if len(unique_vals) == 1:
             if unique_vals[0] in (0, 1):
-                return series.astype(int)
+                res.loc[non_null.index] = non_null.astype(int)
+                return res
             raise ValueError(
                 f"Binary outcome column contains single non-standard numeric value {unique_vals[0]}. "
                 "Explicit positive-event value required."
@@ -79,7 +109,7 @@ def _coerce_to_binary_series(series: pd.Series, positive_val: Any = None) -> pd.
         )
 
     # String / categorical / object mapping
-    s_str = series.astype(str).str.strip().str.lower()
+    s_str = non_null.astype(str).str.strip().str.lower()
     pos_tokens = {
         "1",
         "1.0",
@@ -129,7 +159,7 @@ def _coerce_to_binary_series(series: pd.Series, positive_val: Any = None) -> pd.
     }
 
     # If exactly 2 distinct string values present, evaluate against token dictionaries
-    unique_s = sorted(s_str.dropna().unique())
+    unique_s = sorted(s_str.unique())
     if len(unique_s) == 2:
         val0, val1 = unique_s[0], unique_s[1]
         val0_pos = val0 in pos_tokens or any(
@@ -186,13 +216,17 @@ def _coerce_to_binary_series(series: pd.Series, positive_val: Any = None) -> pd.
         )
 
         if val1_pos and (val0_neg or not val0_pos):
-            return (s_str == val1).astype(int)
+            res.loc[non_null.index] = (s_str == val1).astype(int)
+            return res
         if val0_pos and (val1_neg or not val1_pos):
-            return (s_str == val0).astype(int)
+            res.loc[non_null.index] = (s_str == val0).astype(int)
+            return res
         if val0_neg and not val1_neg:
-            return (s_str != val0).astype(int)
+            res.loc[non_null.index] = (s_str != val0).astype(int)
+            return res
         if val1_neg and not val0_neg:
-            return (s_str != val1).astype(int)
+            res.loc[non_null.index] = (s_str != val1).astype(int)
+            return res
         raise ValueError(
             f"Binary outcome column contains unrecognized category values {unique_s}. "
             "Cannot unambiguously determine positive event. "
@@ -217,7 +251,8 @@ def _coerce_to_binary_series(series: pd.Series, positive_val: Any = None) -> pd.
             return 1
         return 0
 
-    return s_str.apply(_map_val)
+    res.loc[non_null.index] = s_str.apply(_map_val).astype(int)
+    return res
 
 
 @dataclass
@@ -365,15 +400,18 @@ class StatHarness:
         df: pd.DataFrame,
         outcome_col: str,
         predictor_cols: list[str],
+        positive_val: Any = None,
     ) -> tuple[pd.DataFrame, dict[str, Any], go.Figure]:
         """Fits binary logistic regression with Odds Ratios and 95% CIs."""
         clean_cols = [outcome_col] + [c for c in predictor_cols if c in df.columns]
         df_clean = df[clean_cols].dropna().copy()
 
-        clean_y = _coerce_to_binary_series(df_clean[outcome_col])
+        clean_y = _coerce_to_binary_series(
+            df_clean[outcome_col], positive_val=positive_val
+        )
         fitted_events = int((clean_y == 1).sum())
         fitted_non_events = int((clean_y == 0).sum())
-        df_clean[outcome_col] = clean_y
+        df_clean[outcome_col] = clean_y.astype(int)
 
         html_table, or_results, status, metrics = logic.run_logistic_regression(
             df=df_clean, outcome_col=outcome_col, covariate_cols=predictor_cols
@@ -471,6 +509,9 @@ class StatHarness:
         fp: int | None = None,
         fn: int | None = None,
         tn: int | None = None,
+        positive_val: Any = None,
+        index_positive_val: Any = None,
+        ref_positive_val: Any = None,
     ) -> tuple[pd.DataFrame, dict[str, Any], go.Figure]:
         """Calculates Diagnostic Test Accuracy (STARD 2015) & Bayesian Fagan Nomogram."""
         calc_tp, calc_fp, calc_fn, calc_tn = None, None, None, None
@@ -519,8 +560,22 @@ class StatHarness:
                 sub = df[[idx_col, ref_col]].dropna()
                 if not sub.empty:
                     try:
-                        y_test = _coerce_to_binary_series(sub[idx_col])
-                        y_ref = _coerce_to_binary_series(sub[ref_col])
+                        idx_pos = (
+                            index_positive_val
+                            if index_positive_val is not None
+                            else positive_val
+                        )
+                        ref_pos = (
+                            ref_positive_val
+                            if ref_positive_val is not None
+                            else positive_val
+                        )
+                        y_test = _coerce_to_binary_series(
+                            sub[idx_col], positive_val=idx_pos
+                        )
+                        y_ref = _coerce_to_binary_series(
+                            sub[ref_col], positive_val=ref_pos
+                        )
                         calc_tp = int(((y_test == 1) & (y_ref == 1)).sum())
                         calc_fp = int(((y_test == 1) & (y_ref == 0)).sum())
                         calc_fn = int(((y_test == 0) & (y_ref == 1)).sum())
@@ -693,6 +748,9 @@ class StatHarness:
         df: pd.DataFrame,
         treatment_col: str,
         outcome_col: str,
+        positive_val: Any = None,
+        treatment_positive_val: Any = None,
+        outcome_positive_val: Any = None,
     ) -> tuple[pd.DataFrame, dict[str, Any], go.Figure]:
         """
         Evaluates a 2-arm Randomized Controlled Trial (CONSORT compliant) for binary primary outcomes.
@@ -700,8 +758,12 @@ class StatHarness:
         Relative Risk Reduction (RRR), and Number Needed to Treat (NNT) with 95% Confidence Intervals.
         """
         clean_df = df[[treatment_col, outcome_col]].dropna()
-        t_bin = _coerce_to_binary_series(clean_df[treatment_col])
-        y_bin = _coerce_to_binary_series(clean_df[outcome_col])
+        t_pos = treatment_positive_val
+        y_pos = (
+            outcome_positive_val if outcome_positive_val is not None else positive_val
+        )
+        t_bin = _coerce_to_binary_series(clean_df[treatment_col], positive_val=t_pos)
+        y_bin = _coerce_to_binary_series(clean_df[outcome_col], positive_val=y_pos)
 
         # Control (0) vs Intervention (1)
         n_ctrl = int((t_bin == 0).sum())
@@ -885,6 +947,8 @@ class StatHarness:
         outcome_col: str | None = None,
         caliper: float = 0.20,
         ratio: int = 1,
+        positive_val: Any = None,
+        outcome_positive_val: Any = None,
     ) -> tuple[pd.DataFrame, dict[str, Any], go.Figure, pd.DataFrame]:
         """
         Executes 1:1 Nearest-Neighbor Propensity Score Matching (PSM),
@@ -955,10 +1019,16 @@ class StatHarness:
             ].dropna()
             if not clean_matched.empty:
                 try:
+                    outcome_pos = (
+                        outcome_positive_val
+                        if outcome_positive_val is not None
+                        else positive_val
+                    )
                     matched_coef_df, matched_metrics, _ = StatHarness.run_logistic(
                         clean_matched,
                         outcome_col=outcome_col,
                         predictor_cols=[treatment_col] + covariate_cols,
+                        positive_val=outcome_pos,
                     )
                     matched_outcome_stats = matched_metrics
                 except Exception as e:
@@ -1031,6 +1101,7 @@ class ClinicalAnalystEngine:
         user_msg = (user_message or "").strip()
         lower_msg = user_msg.lower()
         file_paths = file_paths or []
+        extracted_pos_val = _extract_positive_val_from_message(user_msg)
 
         proposal_meta: ProposalMetadata | None = None
         loaded_new_data = False
@@ -1118,6 +1189,7 @@ class ClinicalAnalystEngine:
                     df_gen,
                     treatment_col=t_col,
                     outcome_col=o_col,
+                    positive_val=extracted_pos_val,
                 )
                 critique = CritiqueEngine.appraise_analysis("rct", df_gen, metrics)
                 state.last_analysis_type = "rct"
@@ -1153,6 +1225,7 @@ class ClinicalAnalystEngine:
                     event_col=event_col,
                     group_col=treat_col,
                     covar_cols=covars,
+                    positive_val=extracted_pos_val,
                 )
                 km_p_val = stats_dict.get("km_stats", {}).get("p_value", "N/A")
                 km_p_val_str = (
@@ -1229,6 +1302,7 @@ class ClinicalAnalystEngine:
                     df_gen,
                     index_test_col=idx_col,
                     ref_standard_col=ref_col,
+                    positive_val=extracted_pos_val,
                 )
                 matrix_label = (
                     "2x2 Matrix Counts (Demonstration Example Data)"
@@ -1270,6 +1344,7 @@ class ClinicalAnalystEngine:
                     df_gen,
                     outcome_col=o_col,
                     predictor_cols=p_cols,
+                    positive_val=extracted_pos_val,
                 )
                 critique = CritiqueEngine.appraise_analysis(
                     "logistic",
@@ -1310,6 +1385,7 @@ class ClinicalAnalystEngine:
                     outcome_col=o_col,
                     caliper=0.20,
                     ratio=1,
+                    positive_val=extracted_pos_val,
                 )
 
                 state.df_matched = df_matched
@@ -1471,7 +1547,11 @@ Dataset saved to session and ready for downstream analysis.
             critique_md = ""
             if time_col and event_col:
                 fig, km_df, stats_dict = StatHarness.run_survival(
-                    df_gen, time_col=time_col, event_col=event_col, group_col=treat_col
+                    df_gen,
+                    time_col=time_col,
+                    event_col=event_col,
+                    group_col=treat_col,
+                    positive_val=extracted_pos_val,
                 )
                 critique = CritiqueEngine.appraise_analysis(
                     "survival",
@@ -1618,6 +1698,7 @@ Dataset saved to session and ready for downstream analysis.
                         event_col=event_col,
                         group_col=treat_col,
                         covar_cols=covar_candidates,
+                        positive_val=extracted_pos_val,
                     )
                     p_val = stats_dict.get("km_stats", {}).get("p_value", "N/A")
                     p_val_str = (
@@ -1657,6 +1738,7 @@ Dataset saved to session and ready for downstream analysis.
                         df,
                         outcome_col=event_col,
                         predictor_cols=covar_candidates or [treat_col],
+                        positive_val=extracted_pos_val,
                     )
                     critique = CritiqueEngine.appraise_analysis(
                         "logistic",
@@ -1757,6 +1839,7 @@ Dataset saved to session and ready for downstream analysis.
                     event_col=event_col,
                     group_col=treat_col,
                     covar_cols=covariates,
+                    positive_val=extracted_pos_val,
                 )
                 p_val = stats_dict.get("km_stats", {}).get("p_value", "N/A")
                 p_val_str = f"{p_val:.4f}" if isinstance(p_val, float) else str(p_val)
@@ -1827,6 +1910,7 @@ Dataset saved to session and ready for downstream analysis.
                         df,
                         outcome_col=target_outcome,
                         predictor_cols=covariates or cols[:4],
+                        positive_val=extracted_pos_val,
                     )
                     table_md = coef_df.to_markdown(index=False)
                     critique = CritiqueEngine.appraise_analysis(

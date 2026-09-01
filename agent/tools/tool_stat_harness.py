@@ -64,6 +64,11 @@ class SurvivalAnalysisTool(Tool):
             "description": "Optional list of covariate column names for multivariable Cox PH adjustment.",
             "nullable": True,
         },
+        "positive_val": {
+            "type": "any",
+            "description": "Optional explicit value representing positive event (e.g. 2 or 'dead').",
+            "nullable": True,
+        },
     }
     output_type = "string"
 
@@ -78,6 +83,7 @@ class SurvivalAnalysisTool(Tool):
         event_col: str,
         group_col: Optional[str] = None,
         covar_cols: Optional[List[str]] = None,
+        positive_val: Optional[Any] = None,
     ) -> tuple[str, go.Figure, pd.DataFrame, dict[str, Any]]:
         from agent.clinical_analyst import StatHarness
 
@@ -87,6 +93,7 @@ class SurvivalAnalysisTool(Tool):
             event_col=event_col,
             group_col=group_col,
             covar_cols=covar_cols,
+            positive_val=positive_val,
         )
         p_val = stats_dict.get("km_stats", {}).get("p_value", "N/A")
         p_val_str = f"{p_val:.4f}" if isinstance(p_val, (int, float)) else str(p_val)
@@ -119,6 +126,7 @@ class SurvivalAnalysisTool(Tool):
         event_col: str,
         group_col: Optional[str] = None,
         covar_cols: Optional[List[str]] = None,
+        positive_val: Optional[Any] = None,
     ) -> str:
         if self.state_df_provider is None or self.state_df_provider() is None:
             return "Error: No active dataset loaded in session to perform survival analysis."
@@ -129,6 +137,7 @@ class SurvivalAnalysisTool(Tool):
             event_col=event_col,
             group_col=group_col,
             covar_cols=covar_cols,
+            positive_val=positive_val,
         )
         return text_out
 
@@ -216,6 +225,11 @@ class LogisticRegressionTool(Tool):
             "items": {"type": "string"},
             "description": "List of independent predictors and confounder variables.",
         },
+        "positive_val": {
+            "type": "any",
+            "description": "Optional explicit value representing positive outcome event (e.g. 2 or 'dead').",
+            "nullable": True,
+        },
     }
     output_type = "string"
 
@@ -228,11 +242,15 @@ class LogisticRegressionTool(Tool):
         df: pd.DataFrame,
         outcome_col: str,
         predictor_cols: List[str],
+        positive_val: Optional[Any] = None,
     ) -> tuple[str, go.Figure, pd.DataFrame, dict[str, Any]]:
         from agent.clinical_analyst import StatHarness
 
         coef_df, metrics, fig = StatHarness.run_logistic(
-            df=df, outcome_col=outcome_col, predictor_cols=predictor_cols
+            df=df,
+            outcome_col=outcome_col,
+            predictor_cols=predictor_cols,
+            positive_val=positive_val,
         )
         table_md = (
             coef_df.to_markdown(index=False)
@@ -253,6 +271,7 @@ class LogisticRegressionTool(Tool):
         self,
         outcome_col: str,
         predictor_cols: List[str],
+        positive_val: Optional[Any] = None,
     ) -> str:
         if self.state_df_provider is None or self.state_df_provider() is None:
             return (
@@ -260,7 +279,10 @@ class LogisticRegressionTool(Tool):
             )
         df = self.state_df_provider()
         text_out, _, _, _ = self.run_with_dataframe(
-            df=df, outcome_col=outcome_col, predictor_cols=predictor_cols
+            df=df,
+            outcome_col=outcome_col,
+            predictor_cols=predictor_cols,
+            positive_val=positive_val,
         )
         return text_out
 
@@ -309,6 +331,21 @@ class DiagnosticAccuracyTool(Tool):
             "description": "Pre-test clinical probability percentage (0.0 to 100.0, default 25.0%).",
             "nullable": True,
         },
+        "positive_val": {
+            "type": "any",
+            "description": "Optional explicit value representing positive outcome/event.",
+            "nullable": True,
+        },
+        "index_positive_val": {
+            "type": "any",
+            "description": "Optional explicit value representing positive index test.",
+            "nullable": True,
+        },
+        "ref_positive_val": {
+            "type": "any",
+            "description": "Optional explicit value representing positive reference standard.",
+            "nullable": True,
+        },
     }
     output_type = "string"
 
@@ -326,6 +363,9 @@ class DiagnosticAccuracyTool(Tool):
         fp: Optional[int] = None,
         fn: Optional[int] = None,
         tn: Optional[int] = None,
+        positive_val: Optional[Any] = None,
+        index_positive_val: Optional[Any] = None,
+        ref_positive_val: Optional[Any] = None,
     ) -> tuple[str, go.Figure, pd.DataFrame, dict[str, Any]]:
         from agent.clinical_analyst import StatHarness
 
@@ -338,6 +378,9 @@ class DiagnosticAccuracyTool(Tool):
             fp=fp,
             fn=fn,
             tn=tn,
+            positive_val=positive_val,
+            index_positive_val=index_positive_val,
+            ref_positive_val=ref_positive_val,
         )
         text_out = (
             f"### 🎯 Diagnostic Accuracy & Bayesian Nomogram (STARD 2015)\n"
@@ -361,6 +404,9 @@ class DiagnosticAccuracyTool(Tool):
         fn: Optional[int] = None,
         tn: Optional[int] = None,
         pre_test_prob: Optional[float] = None,
+        positive_val: Optional[Any] = None,
+        index_positive_val: Optional[Any] = None,
+        ref_positive_val: Optional[Any] = None,
     ) -> str:
         df = self.state_df_provider() if self.state_df_provider else None
         text_out, _, _, _ = self.run_with_dataframe(
@@ -372,6 +418,9 @@ class DiagnosticAccuracyTool(Tool):
             fn=fn,
             tn=tn,
             pre_test_prob=pre_test_prob,
+            positive_val=positive_val,
+            index_positive_val=index_positive_val,
+            ref_positive_val=ref_positive_val,
         )
         return text_out
 
@@ -392,6 +441,21 @@ class BinaryRCTTool(Tool):
             "type": "string",
             "description": "Column name for primary binary clinical endpoint (1 = event, 0 = no event).",
         },
+        "positive_val": {
+            "type": "any",
+            "description": "Optional explicit value representing positive outcome event.",
+            "nullable": True,
+        },
+        "treatment_positive_val": {
+            "type": "any",
+            "description": "Optional explicit value representing active treatment arm.",
+            "nullable": True,
+        },
+        "outcome_positive_val": {
+            "type": "any",
+            "description": "Optional explicit value representing positive outcome event.",
+            "nullable": True,
+        },
     }
     output_type = "string"
 
@@ -404,11 +468,19 @@ class BinaryRCTTool(Tool):
         df: pd.DataFrame,
         treatment_col: str,
         outcome_col: str,
+        positive_val: Optional[Any] = None,
+        treatment_positive_val: Optional[Any] = None,
+        outcome_positive_val: Optional[Any] = None,
     ) -> tuple[str, go.Figure, pd.DataFrame, dict[str, Any]]:
         from agent.clinical_analyst import StatHarness
 
         summary_df, metrics, fig = StatHarness.run_binary_rct(
-            df=df, treatment_col=treatment_col, outcome_col=outcome_col
+            df=df,
+            treatment_col=treatment_col,
+            outcome_col=outcome_col,
+            positive_val=positive_val,
+            treatment_positive_val=treatment_positive_val,
+            outcome_positive_val=outcome_positive_val,
         )
         text_out = (
             f"### 💊 Randomized Controlled Trial Evaluation (CONSORT 2010)\n"
@@ -426,12 +498,24 @@ class BinaryRCTTool(Tool):
         )
         return text_out, fig, summary_df, metrics
 
-    def forward(self, treatment_col: str, outcome_col: str) -> str:
+    def forward(
+        self,
+        treatment_col: str,
+        outcome_col: str,
+        positive_val: Optional[Any] = None,
+        treatment_positive_val: Optional[Any] = None,
+        outcome_positive_val: Optional[Any] = None,
+    ) -> str:
         if self.state_df_provider is None or self.state_df_provider() is None:
             return "Error: No active dataset loaded in session to evaluate RCT."
         df = self.state_df_provider()
         text_out, _, _, _ = self.run_with_dataframe(
-            df=df, treatment_col=treatment_col, outcome_col=outcome_col
+            df=df,
+            treatment_col=treatment_col,
+            outcome_col=outcome_col,
+            positive_val=positive_val,
+            treatment_positive_val=treatment_positive_val,
+            outcome_positive_val=outcome_positive_val,
         )
         return text_out
 
