@@ -134,6 +134,8 @@ class StatHarness:
 
         cox_df = None
         cox_stats = {}
+        fitted_events = None
+        fitted_non_events = None
         if covar_cols and len(covar_cols) > 0:
             cph, res_df, clean_data, err, c_stats, _ = survival_lib.fit_cox_ph(
                 df=df,
@@ -144,6 +146,20 @@ class StatHarness:
             if not err and res_df is not None:
                 cox_df = res_df
                 cox_stats = c_stats or {}
+                if (
+                    clean_data is not None
+                    and not clean_data.empty
+                    and event_col in clean_data.columns
+                ):
+                    fitted_events = int(clean_data[event_col].sum())
+                    fitted_non_events = len(clean_data) - fitted_events
+                elif "Number of Events" in cox_stats:
+                    try:
+                        fitted_events = int(cox_stats["Number of Events"])
+                        n_obs = int(cox_stats.get("Number of Observations", len(df)))
+                        fitted_non_events = n_obs - fitted_events
+                    except (ValueError, TypeError):
+                        pass
                 if cph is not None and hasattr(cph, "compute_residuals"):
                     try:
                         from lifelines.statistics import proportional_hazard_test
@@ -171,6 +187,8 @@ class StatHarness:
                 "cox_df": cox_df,
                 "cox_stats": cox_stats,
                 "missing_info": missing_info,
+                "fitted_events": fitted_events,
+                "fitted_non_events": fitted_non_events,
             },
         )
 
@@ -860,6 +878,9 @@ class ClinicalAnalystEngine:
                     state.file_name = p.name
                     state.df_matched = None
                     state.is_matched = False
+                    state.last_analysis_type = None
+                    state.last_analysis_results = {}
+                    state.last_critique_md = None
                     loaded_new_data = True
                 except Exception as e:
                     logger.error(f"Error loading dataset {p.name}: {e}")
@@ -1268,10 +1289,26 @@ Dataset saved to session and ready for downstream analysis.
 
             fig = go.Figure()
             stats_dict = {}
+            critique_md = ""
             if time_col and event_col:
                 fig, km_df, stats_dict = StatHarness.run_survival(
                     df_gen, time_col=time_col, event_col=event_col, group_col=treat_col
                 )
+                critique = CritiqueEngine.appraise_analysis(
+                    "survival",
+                    df_gen,
+                    {
+                        "time_col": time_col,
+                        "event_col": event_col,
+                        "cox_stats": stats_dict.get("cox_stats", {}),
+                        "fitted_events": stats_dict.get("fitted_events"),
+                        "fitted_non_events": stats_dict.get("fitted_non_events"),
+                    },
+                )
+                state.last_analysis_type = "survival"
+                state.last_analysis_results = stats_dict
+                state.last_critique_md = critique.to_markdown()
+                critique_md = f"\n---\n{critique.to_markdown()}"
 
             km_p_val = stats_dict.get("km_stats", {}).get("p_value", "N/A")
             km_p_val_str = (
@@ -1296,6 +1333,7 @@ Dataset saved to session and ready for downstream analysis.
    - **Log-Rank Test P-value:** `{km_p_val_str}`
    - **Total Events:** `{df_gen[event_col].sum() if event_col else "N/A"}` events
 2. **Session State Synced:** You can now switch to **📊 Data Profiler**, **📈 Regression**, or **👥 Table 1 & Matching** tabs for further in-depth analysis.
+{critique_md}
 """
             return response_md, state, fig, df_gen
 
@@ -1359,13 +1397,30 @@ Dataset saved to session and ready for downstream analysis.
                 df = state.df
                 cols = df.columns.tolist()
                 time_col = select_variable_by_keyword(
-                    cols, ["time", "duration", "days", "fu_time"]
+                    cols,
+                    [
+                        "time",
+                        "duration",
+                        "days",
+                        "fu_time",
+                        "followup",
+                        "follow_up",
+                        "surv_time",
+                    ],
+                    default_to_first=False,
                 )
+                if time_col and not pd.api.types.is_numeric_dtype(df[time_col]):
+                    time_col = None
+
                 event_col = select_variable_by_keyword(
-                    cols, ["death", "event", "status", "mortality"]
+                    [c for c in cols if c != time_col],
+                    ["death", "event", "status", "mortality"],
+                    default_to_first=False,
                 )
                 treat_col = select_variable_by_keyword(
-                    cols, ["treatment", "group", "arm", "therapy"]
+                    [c for c in cols if c not in [time_col, event_col]],
+                    ["treatment", "group", "arm", "therapy"],
+                    default_to_first=False,
                 )
                 covar_candidates = [
                     c
@@ -1389,6 +1444,21 @@ Dataset saved to session and ready for downstream analysis.
                     p_val_str = (
                         f"{p_val:.4f}" if isinstance(p_val, float) else str(p_val)
                     )
+                    critique = CritiqueEngine.appraise_analysis(
+                        "survival",
+                        df,
+                        {
+                            "time_col": time_col,
+                            "event_col": event_col,
+                            "covar_cols": covar_candidates,
+                            "cox_stats": stats_dict.get("cox_stats", {}),
+                            "fitted_events": stats_dict.get("fitted_events"),
+                            "fitted_non_events": stats_dict.get("fitted_non_events"),
+                        },
+                    )
+                    state.last_analysis_type = "survival"
+                    state.last_analysis_results = stats_dict
+                    state.last_critique_md = critique.to_markdown()
 
                     dataset_exec_section = f"""
 ---
@@ -1399,6 +1469,9 @@ Dataset saved to session and ready for downstream analysis.
 - **Multivariable Cox Model:** Adjusted for confounders ({covar_str})
 
 *(Kaplan-Meier Survival Function is displayed in the Visual Output panel on the right)*
+
+---
+{critique.to_markdown()}
 """
                 elif event_col and treat_col:
                     coef_df, metrics, fig = StatHarness.run_logistic(
@@ -1406,12 +1479,30 @@ Dataset saved to session and ready for downstream analysis.
                         outcome_col=event_col,
                         predictor_cols=covar_candidates or [treat_col],
                     )
+                    critique = CritiqueEngine.appraise_analysis(
+                        "logistic",
+                        df,
+                        {
+                            "outcome_col": event_col,
+                            "predictor_cols": covar_candidates or [treat_col],
+                            "coef_df": coef_df,
+                            "fitted_events": metrics.get("fitted_events"),
+                            "fitted_non_events": metrics.get("fitted_non_events"),
+                        },
+                    )
+                    state.last_analysis_type = "logistic"
+                    state.last_analysis_results = metrics
+                    state.last_critique_md = critique.to_markdown()
+
                     dataset_exec_section = f"""
 ---
 ### 🚀 Multivariable Logistic Regression Execution:
 - **Dataset:** `{state.file_name}` (n = {len(df):,} records)
 - **Primary Binary Outcome:** `{event_col}`
 - **Pseudo $R^2$ (McFadden):** `{metrics.get("mcfadden", 0.0):.4f}` | **AIC:** `{metrics.get("aic", 0.0):.1f}`
+
+---
+{critique.to_markdown()}
 """
             else:
                 sample_calc = StatHarness.run_sample_size(

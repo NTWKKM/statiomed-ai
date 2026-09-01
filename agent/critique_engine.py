@@ -278,8 +278,30 @@ class CritiqueEngine:
             covar_cols = results_meta.get("covar_cols", [])
             cox_stats = results_meta.get("cox_stats", {})
             event_col = results_meta.get("event_col", "event")
-            events = int(df[event_col].sum()) if event_col in df.columns else 0
-            non_events = len(df) - events
+
+            # Calculate EPV from fitted complete-case cohort if available, fallback to df
+            if (
+                "fitted_events" in results_meta
+                and results_meta["fitted_events"] is not None
+            ):
+                events = int(results_meta["fitted_events"])
+                non_events = (
+                    int(results_meta["fitted_non_events"])
+                    if "fitted_non_events" in results_meta
+                    and results_meta["fitted_non_events"] is not None
+                    else len(df) - events
+                )
+            elif isinstance(cox_stats, dict) and "Number of Events" in cox_stats:
+                try:
+                    events = int(cox_stats["Number of Events"])
+                    n_obs = int(cox_stats.get("Number of Observations", len(df)))
+                    non_events = n_obs - events
+                except (ValueError, TypeError):
+                    events = int(df[event_col].sum()) if event_col in df.columns else 0
+                    non_events = len(df) - events
+            else:
+                events = int(df[event_col].sum()) if event_col in df.columns else 0
+                non_events = len(df) - events
 
             # Proportional Hazards (PH) diagnostic check
             ph_diag = results_meta.get("ph_diagnostic")
@@ -435,6 +457,46 @@ class CritiqueEngine:
             strengths.append(
                 "Love plot enables visual confirmation of covariate balance (< 0.10 threshold)."
             )
+
+            # Check for residual imbalance in balance_df
+            balance_df = results_meta.get("balance_df")
+            if isinstance(balance_df, pd.DataFrame) and not balance_df.empty:
+                imbalanced_vars = []
+                for _, row in balance_df.iterrows():
+                    status_val = str(row.get("Status", row.get("Balance Status", "")))
+                    smd_post_val = row.get(
+                        "SMD After", row.get("SMD (Matched)", row.get("SMD Post", None))
+                    )
+                    cov_name = str(
+                        row.get("Covariate", row.get("Variable", "Covariate"))
+                    )
+                    if "⚠️" in status_val or "Imbalanced" in status_val:
+                        imbalanced_vars.append(cov_name)
+                    elif smd_post_val is not None:
+                        try:
+                            if abs(float(smd_post_val)) >= 0.10:
+                                imbalanced_vars.append(cov_name)
+                        except (ValueError, TypeError):
+                            pass
+
+                if imbalanced_vars:
+                    # Deduplicate while preserving order
+                    imbalanced_vars = list(dict.fromkeys(imbalanced_vars))
+                    findings.append(
+                        CritiqueFinding(
+                            category="Confounding_Bias",
+                            severity="MODERATE",
+                            title=f"Residual Post-Match Covariate Imbalance ({len(imbalanced_vars)} variable{'s' if len(imbalanced_vars) > 1 else ''})",
+                            description=(
+                                f"Covariates {', '.join([f'`{v}`' for v in imbalanced_vars])} maintain a post-matching "
+                                f"Standardized Mean Difference (SMD) ≥ 0.10 (⚠️ Imbalanced), indicating residual confounding in the matched cohort."
+                            ),
+                            recommendation=(
+                                "Consider tightening the matching caliper width (e.g. 0.1 SD of logit PS), incorporating exact matching "
+                                "for key prognostic factors, or adjusting for residual imbalanced variables in downstream regression models."
+                            ),
+                        )
+                    )
 
             n_orig = results_meta.get("n_original", len(df))
             n_matched = results_meta.get("n_matched", 0)

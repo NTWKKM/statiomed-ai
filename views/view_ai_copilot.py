@@ -378,10 +378,11 @@ def create_ai_copilot_view(
 
                         # Right Toolbar Group: Mic icon & Circular Send button
                         with gr.Row(elem_classes=["toolbar-right-group"]):
-                            gr.Button(
+                            btn_mic = gr.Button(
                                 "🎙️",
                                 variant="secondary",
                                 elem_classes=["btn-icon-mic"],
+                                interactive=False,
                             )
                             btn_send = gr.Button(
                                 "➔",
@@ -663,6 +664,7 @@ def create_ai_copilot_view(
         "chat_input": chat_input,
         "file_uploader": file_uploader,
         "btn_send": btn_send,
+        "btn_mic": btn_mic,
         "btn_clear": btn_clear,
         "plot_output": plot_output,
         "dataset_preview": dataset_preview,

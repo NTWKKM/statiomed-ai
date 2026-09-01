@@ -214,3 +214,107 @@ def test_appraise_analysis_verdict():
     ]
     md = verdict.to_markdown()
     assert "Automated Clinical Critique & Appraisal" in md
+
+
+def test_psm_balance_critique_finding():
+    df = pd.DataFrame(
+        {
+            "treatment": [1, 0] * 50,
+            "age": np.random.normal(60, 10, 100),
+            "bmi": np.random.normal(25, 4, 100),
+        }
+    )
+    # 1. PSM with imbalanced covariate
+    balance_df_imbalanced = pd.DataFrame(
+        [
+            {
+                "Covariate": "age",
+                "SMD Before": "0.350",
+                "SMD After": "0.150",
+                "Status": "⚠️ Imbalanced (≥0.10)",
+            },
+            {
+                "Covariate": "bmi",
+                "SMD Before": "0.200",
+                "SMD After": "0.040",
+                "Status": "✅ Balanced (<0.10)",
+            },
+        ]
+    )
+    verdict_imbalanced = CritiqueEngine.appraise_analysis(
+        "psm",
+        df=df,
+        results_meta={
+            "n_original": 100,
+            "n_matched": 80,
+            "balance_df": balance_df_imbalanced,
+        },
+    )
+    assert verdict_imbalanced.overall_status == "VALID_WITH_LIMITATIONS"
+    imb_finding = next(
+        (f for f in verdict_imbalanced.findings if f.category == "Confounding_Bias"),
+        None,
+    )
+    assert imb_finding is not None
+    assert imb_finding.severity == "MODERATE"
+    assert "Residual Post-Match Covariate Imbalance" in imb_finding.title
+    assert "`age`" in imb_finding.description
+
+    # 2. PSM with perfectly balanced covariates (< 0.10)
+    balance_df_balanced = pd.DataFrame(
+        [
+            {
+                "Covariate": "age",
+                "SMD Before": "0.350",
+                "SMD After": "0.050",
+                "Status": "✅ Balanced (<0.10)",
+            },
+            {
+                "Covariate": "bmi",
+                "SMD Before": "0.200",
+                "SMD After": "0.040",
+                "Status": "✅ Balanced (<0.10)",
+            },
+        ]
+    )
+    verdict_balanced = CritiqueEngine.appraise_analysis(
+        "psm",
+        df=df,
+        results_meta={
+            "n_original": 100,
+            "n_matched": 80,
+            "balance_df": balance_df_balanced,
+        },
+    )
+    assert verdict_balanced.overall_status == "ROBUST"
+    assert not any(f.category == "Confounding_Bias" for f in verdict_balanced.findings)
+
+
+def test_survival_epv_from_fitted_cohort():
+    # 100 rows, 30 events in full df
+    # Missing covariates reduce fitted complete-case events to 4
+    df = pd.DataFrame(
+        {
+            "time": [10, 20, 30, 40, 50] * 20,
+            "event": [1, 0, 1, 0, 1] * 20,
+            "covar1": [1.0] * 100,
+            "covar2": [2.0] * 100,
+        }
+    )
+    # When fitted_events=4 is provided for 2 covariates -> EPV = 4/2 = 2.0 (HIGH risk)
+    verdict = CritiqueEngine.appraise_analysis(
+        "survival",
+        df=df,
+        results_meta={
+            "time_col": "time",
+            "event_col": "event",
+            "covar_cols": ["covar1", "covar2"],
+            "fitted_events": 4,
+            "fitted_non_events": 50,
+        },
+    )
+    epv_finding = next((f for f in verdict.findings if f.category == "EPV"), None)
+    assert epv_finding is not None
+    assert epv_finding.severity == "HIGH"
+    assert "Severe EPV Deficit" in epv_finding.title
+    assert "2.0" in epv_finding.title

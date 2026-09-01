@@ -489,6 +489,7 @@ class PropensityScoreMatchingTool(Tool):
         )
         text_out = (
             f"### ⚖️ Propensity Score Matching (1:1 Nearest Neighbor, Caliper={caliper:.2f})\n"
+            f"- **Treatment / Exposure Variable:** `{treatment_col}`\n"
             f"- **Cohort Size:** Original n={stats_dict['n_original']:,} ➔ Matched n={stats_dict['n_matched']:,} ({stats_dict['n_treated_matched']:,} pairs)\n"
             f"- **Confounders Adjusted:** {', '.join([f'`{c}`' for c in covariate_cols])}\n\n"
             f"#### Covariate Balance (Standardized Mean Difference < 0.10):\n"

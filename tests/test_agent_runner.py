@@ -98,25 +98,84 @@ def test_tool_routing_non_canonical_columns():
 
     agent = create_clinical_agent(state_df_provider=lambda: df_non_canonical)
 
-    # 1. Survival routing with non-canonical columns
+    # 1. Survival routing with non-canonical columns: assert exact columns & appraisal
     res_surv = execute_agent_turn(agent, "Run survival analysis kaplan meier")
     assert "Survival Analysis" in res_surv
-    assert "follow_up_days" in res_surv or "death_status" in res_surv
+    assert "`follow_up_days`" in res_surv
+    assert "`death_status`" in res_surv
+    assert "Automated Clinical Critique & Appraisal" in res_surv
 
-    # 2. Logistic routing with non-canonical columns
+    # 2. Logistic routing with non-canonical columns: assert exact outcome column & appraisal
     res_logit = execute_agent_turn(agent, "Run multivariable logistic regression")
     assert "Logistic Regression" in res_logit
-    assert "aki_endpoint" in res_logit or "Odds Ratio" in res_logit
+    assert "`aki_endpoint`" in res_logit
+    assert "Automated Clinical Critique & Appraisal" in res_logit
 
-    # 3. RCT routing with non-canonical columns
+    # 3. RCT routing with non-canonical columns: assert exact treatment & outcome & appraisal
     res_rct = execute_agent_turn(agent, "Analyze randomized trial consort")
     assert "Randomized Controlled Trial" in res_rct
-    assert "study_arm" in res_rct or "Relative Risk" in res_rct
+    assert "`study_arm`" in res_rct
+    assert "`aki_endpoint`" in res_rct
+    assert "Automated Clinical Critique & Appraisal" in res_rct
 
-    # 4. PSM routing with non-canonical columns
+    # 4. PSM routing with non-canonical columns: assert exact treatment & appraisal
     res_psm = execute_agent_turn(agent, "Run propensity score matching psm")
     assert "Propensity Score Matching" in res_psm
+    assert "`study_arm`" in res_psm
+    assert "Automated Clinical Critique & Appraisal" in res_psm
 
-    # 5. Linear regression (OLS) with non-canonical columns
+    # 5. Linear regression (OLS) with non-canonical columns: assert exact continuous outcome
     res_linear = execute_agent_turn(agent, "Run linear regression ols")
     assert "Linear Regression" in res_linear
+    assert "`sbp_mmhg`" in res_linear
+
+
+def test_cox_routing_passes_non_empty_covariates():
+    import numpy as np
+    import pandas as pd
+
+    df_cox = pd.DataFrame(
+        {
+            "follow_up_days": [10, 20, 30, 40, 50] * 20,
+            "death_status": [1, 0, 1, 0, 1] * 20,
+            "treatment": [1, 1, 0, 0, 1] * 20,
+            "age": np.random.normal(60, 10, 100),
+            "bmi": np.random.normal(25, 4, 100),
+        }
+    )
+
+    agent = create_clinical_agent(state_df_provider=lambda: df_cox)
+    res_cox = execute_agent_turn(agent, "Fit Cox proportional hazards regression model")
+
+    assert "Cox Proportional Hazards" in res_cox
+    assert "Multivariable Cox Proportional Hazards Model" in res_cox
+    # Check that covariates (e.g. treatment, age, bmi) were passed and included
+    assert "treatment" in res_cox or "age" in res_cox
+    assert "Automated Clinical Critique & Appraisal" in res_cox
+
+
+def test_tool_routing_rejects_unresolved_columns_without_positional_fallbacks():
+    import pandas as pd
+
+    # Dataset with ambiguous column names that do not match semantic keywords
+    df_ambiguous = pd.DataFrame(
+        {
+            "col_alpha": [1, 2, 3, 4, 5] * 20,
+            "col_beta": ["a", "b", "c", "d", "e"] * 20,
+            "col_gamma": [10.5, 20.1, 30.2, 40.8, 50.9] * 20,
+        }
+    )
+
+    agent = create_clinical_agent(state_df_provider=lambda: df_ambiguous)
+
+    # Survival should return explicit column request error
+    res_surv = execute_agent_turn(agent, "Run survival analysis")
+    assert "Error: Could not resolve valid time duration" in res_surv
+
+    # Logistic should return explicit binary outcome request error
+    res_logit = execute_agent_turn(agent, "Run logistic regression")
+    assert "Error: Could not resolve a valid binary outcome column" in res_logit
+
+    # RCT should return explicit column request error
+    res_rct = execute_agent_turn(agent, "Run RCT trial analysis")
+    assert "Error: Could not resolve valid treatment and outcome columns" in res_rct

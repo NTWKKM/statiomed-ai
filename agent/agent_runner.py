@@ -60,303 +60,464 @@ except ImportError:
             self.provider = provider
             self.token = token
 
-    class ToolCallingAgent:
-        def __init__(
-            self, tools: List[Any], model: Any, system_prompt: Optional[str] = None
+
+def _is_identifier_column(col_name: str) -> bool:
+    c_lower = col_name.lower()
+    return any(
+        k in c_lower
+        for k in ["id", "patient", "subject", "hn", "record_id", "mrn", "citizen_id"]
+    )
+
+
+def _is_binary_column(df: pd.DataFrame, col_name: str) -> bool:
+    if col_name not in df.columns:
+        return False
+    return df[col_name].dropna().nunique() <= 2
+
+
+class ToolCallingAgent:
+    def __init__(
+        self, tools: List[Any], model: Any, system_prompt: Optional[str] = None
+    ):
+        self.tools = {t.name: t for t in tools if hasattr(t, "name")}
+        self.model = model
+        self.system_prompt = system_prompt
+
+    def _get_df(self, tool: Any) -> Optional[pd.DataFrame]:
+        if hasattr(tool, "state_df_provider") and callable(tool.state_df_provider):
+            return tool.state_df_provider()
+        return None
+
+    def run(self, prompt: str) -> str:
+        lower_p = prompt.lower()
+        if "sample size" in lower_p or "power" in lower_p or "n_total" in lower_p:
+            tool = self.tools.get("sample_size_calculator")
+            if tool:
+                return tool.forward(test_type="two_proportions", p1=0.25, p2=0.15)
+        elif (
+            "survival" in lower_p
+            or "kaplan" in lower_p
+            or "cox" in lower_p
+            or "logrank" in lower_p
+            or "log-rank" in lower_p
         ):
-            self.tools = {t.name: t for t in tools if hasattr(t, "name")}
-            self.model = model
-            self.system_prompt = system_prompt
+            tool = self.tools.get("survival_analysis")
+            if tool:
+                df = self._get_df(tool)
+                if df is None or df.empty:
+                    return tool.forward(time_col="time", event_col="event")
+                cols = df.columns.tolist()
+                time_col = select_variable_by_keyword(
+                    cols,
+                    [
+                        "time",
+                        "duration",
+                        "followup",
+                        "follow_up",
+                        "days",
+                        "months",
+                        "years",
+                        "surv_time",
+                        "os_months",
+                        "pfs_days",
+                    ],
+                    default_to_first=False,
+                )
+                if time_col and not pd.api.types.is_numeric_dtype(df[time_col]):
+                    time_col = None
 
-        def _get_df(self, tool: Any) -> Optional[pd.DataFrame]:
-            if hasattr(tool, "state_df_provider") and callable(tool.state_df_provider):
-                return tool.state_df_provider()
-            return None
+                event_col = select_variable_by_keyword(
+                    [c for c in cols if c != time_col],
+                    [
+                        "event",
+                        "status",
+                        "death",
+                        "censored",
+                        "recurrence",
+                        "mortality",
+                        "outcome",
+                        "target",
+                    ],
+                    default_to_first=False,
+                )
+                if event_col and not _is_binary_column(df, event_col):
+                    event_col = None
 
-        def run(self, prompt: str) -> str:
-            lower_p = prompt.lower()
-            if "sample size" in lower_p or "power" in lower_p or "n_total" in lower_p:
-                tool = self.tools.get("sample_size_calculator")
-                if tool:
-                    return tool.forward(test_type="two_proportions", p1=0.25, p2=0.15)
-            elif (
-                "survival" in lower_p
-                or "kaplan" in lower_p
-                or "cox" in lower_p
-                or "logrank" in lower_p
-            ):
-                tool = self.tools.get("survival_analysis")
-                if tool:
-                    df = self._get_df(tool)
-                    if df is None or df.empty:
-                        return tool.forward(time_col="time", event_col="event")
-                    cols = df.columns.tolist()
-                    time_col = select_variable_by_keyword(
-                        cols,
-                        [
-                            "time",
-                            "duration",
-                            "followup",
-                            "follow_up",
-                            "days",
-                            "months",
-                            "years",
-                            "surv_time",
-                            "os_months",
-                            "pfs_days",
-                        ],
-                        default_to_first=False,
+                if not time_col or not event_col:
+                    return (
+                        "Error: Could not resolve valid time duration and binary event indicator columns in active dataset for survival analysis. "
+                        "Please provide explicit columns for follow-up duration (numeric) and event status (binary)."
                     )
-                    if not time_col:
-                        num_cols = df.select_dtypes(include=["number"]).columns.tolist()
-                        if num_cols:
-                            time_col = num_cols[0]
-                    event_col = select_variable_by_keyword(
-                        [c for c in cols if c != time_col],
-                        [
-                            "event",
-                            "status",
-                            "death",
-                            "censored",
-                            "recurrence",
-                            "mortality",
-                            "outcome",
-                            "target",
-                        ],
-                        default_to_first=False,
+
+                treat_col = select_variable_by_keyword(
+                    [c for c in cols if c not in [time_col, event_col]],
+                    [
+                        "treatment",
+                        "treat",
+                        "arm",
+                        "group",
+                        "intervention",
+                        "therapy",
+                        "rx",
+                        "exposure",
+                    ],
+                    default_to_first=False,
+                )
+
+                covar_candidates = [
+                    c
+                    for c in cols
+                    if c not in [time_col, event_col, treat_col]
+                    and not _is_identifier_column(c)
+                ][:4]
+
+                is_explicit_cox = "cox" in lower_p
+                if is_explicit_cox and not covar_candidates and not treat_col:
+                    return (
+                        "Error: Cox proportional hazards regression requires at least one covariate or predictor variable. "
+                        "Please specify covariate columns to include in the Cox model."
                     )
-                    if not event_col:
-                        candidates = [c for c in cols if c != time_col]
-                        for c in candidates:
-                            if df[c].dropna().nunique() <= 2:
-                                event_col = c
-                                break
-                    if time_col and event_col:
-                        return tool.forward(time_col=time_col, event_col=event_col)
-                    return "Error: Could not resolve valid time duration and event indicator columns in active dataset for survival analysis. Please provide columns for follow-up duration and event status."
-            elif (
-                "table 1" in lower_p
-                or "baseline characteristics" in lower_p
-                or "table one" in lower_p
-            ):
-                tool = self.tools.get("table_one_baseline")
-                if tool:
+
+                covars_to_pass = (
+                    covar_candidates if (is_explicit_cox or covar_candidates) else None
+                )
+                if is_explicit_cox and not covars_to_pass and treat_col:
+                    covars_to_pass = [treat_col]
+
+                from agent.critique_engine import CritiqueEngine
+
+                text_out, fig, km_summary, stats_dict = tool.run_with_dataframe(
+                    df=df,
+                    time_col=time_col,
+                    event_col=event_col,
+                    group_col=treat_col,
+                    covar_cols=covars_to_pass,
+                )
+                critique = CritiqueEngine.appraise_analysis(
+                    "survival",
+                    df,
+                    {
+                        "time_col": time_col,
+                        "event_col": event_col,
+                        "covar_cols": covars_to_pass,
+                        "cox_stats": stats_dict.get("cox_stats", {}),
+                        "fitted_events": stats_dict.get("fitted_events"),
+                        "fitted_non_events": stats_dict.get("fitted_non_events"),
+                    },
+                )
+                return f"{text_out}\n\n---\n{critique.to_markdown()}"
+
+        elif (
+            "table 1" in lower_p
+            or "baseline characteristics" in lower_p
+            or "table one" in lower_p
+        ):
+            tool = self.tools.get("table_one_baseline")
+            if tool:
+                df = self._get_df(tool)
+                if df is None or df.empty:
                     return tool.forward()
-            elif "logistic" in lower_p or "odds ratio" in lower_p:
-                tool = self.tools.get("logistic_regression")
-                if tool:
-                    df = self._get_df(tool)
-                    if df is None or df.empty:
-                        return tool.forward(
-                            outcome_col="outcome", predictor_cols=["treatment", "age"]
-                        )
+                cols = df.columns.tolist()
+                group_col = select_variable_by_keyword(
+                    cols,
+                    [
+                        "treatment",
+                        "treat",
+                        "arm",
+                        "group",
+                        "intervention",
+                        "therapy",
+                        "exposure",
+                    ],
+                    default_to_first=False,
+                )
+                selected_vars = [
+                    c for c in cols if c != group_col and not _is_identifier_column(c)
+                ][:8]
+                text_out, _, _ = tool.run_with_dataframe(
+                    df=df, group_col=group_col, selected_vars=selected_vars
+                )
+                return text_out
+
+        elif "logistic" in lower_p or "odds ratio" in lower_p:
+            tool = self.tools.get("logistic_regression")
+            if tool:
+                df = self._get_df(tool)
+                if df is None or df.empty:
+                    return tool.forward(
+                        outcome_col="outcome", predictor_cols=["treatment", "age"]
+                    )
+                cols = df.columns.tolist()
+                outcome_col = select_variable_by_keyword(
+                    cols,
+                    [
+                        "outcome",
+                        "death",
+                        "event",
+                        "status",
+                        "response",
+                        "target",
+                        "disease",
+                        "mortality",
+                        "y",
+                        "aki_endpoint",
+                        "recurrence",
+                    ],
+                    default_to_first=False,
+                )
+                if not outcome_col or not _is_binary_column(df, outcome_col):
+                    return (
+                        "Error: Could not resolve a valid binary outcome column in active dataset for logistic regression. "
+                        "Please provide an explicit binary outcome variable (with 2 distinct classes)."
+                    )
+
+                preds = [
+                    c for c in cols if c != outcome_col and not _is_identifier_column(c)
+                ][:4]
+                if not preds:
+                    return "Error: No predictor columns available in active dataset for logistic regression."
+
+                from agent.critique_engine import CritiqueEngine
+
+                text_out, fig, coef_df, metrics = tool.run_with_dataframe(
+                    df=df, outcome_col=outcome_col, predictor_cols=preds
+                )
+                critique = CritiqueEngine.appraise_analysis(
+                    "logistic",
+                    df,
+                    {
+                        "outcome_col": outcome_col,
+                        "predictor_cols": preds,
+                        "coef_df": coef_df,
+                        "fitted_events": metrics.get("fitted_events"),
+                        "fitted_non_events": metrics.get("fitted_non_events"),
+                    },
+                )
+                return f"{text_out}\n\n---\n{critique.to_markdown()}"
+
+        elif (
+            "diagnostic" in lower_p
+            or "sensitivity" in lower_p
+            or "stard" in lower_p
+            or "fagan" in lower_p
+        ):
+            tool = self.tools.get("diagnostic_accuracy")
+            if tool:
+                df = self._get_df(tool)
+                if df is not None and not df.empty:
                     cols = df.columns.tolist()
-                    outcome_col = select_variable_by_keyword(
+                    idx_col = select_variable_by_keyword(
                         cols,
                         [
-                            "outcome",
-                            "death",
-                            "event",
-                            "status",
-                            "response",
-                            "target",
+                            "pocus_scan",
+                            "pocus",
+                            "index_test",
+                            "index",
+                            "test",
+                            "screening",
+                            "biomarker",
+                            "assay",
+                            "marker",
+                        ],
+                        default_to_first=False,
+                    )
+                    ref_col = select_variable_by_keyword(
+                        [c for c in cols if c != idx_col],
+                        [
+                            "gold_standard",
+                            "gold_dx",
+                            "reference",
+                            "ref",
                             "disease",
+                            "diagnosis",
+                            "status",
                             "mortality",
-                            "y",
-                        ],
-                        default_to_first=False,
-                    )
-                    if not outcome_col:
-                        for c in cols:
-                            if df[c].dropna().nunique() <= 2:
-                                outcome_col = c
-                                break
-                    if outcome_col:
-                        preds = [c for c in cols if c != outcome_col]
-                        if preds:
-                            return tool.forward(
-                                outcome_col=outcome_col, predictor_cols=preds[:4]
-                            )
-                        return "Error: No predictor columns available in active dataset for logistic regression."
-                    return "Error: Could not resolve a valid binary outcome column in active dataset for logistic regression. Please provide a binary outcome variable."
-            elif (
-                "diagnostic" in lower_p
-                or "sensitivity" in lower_p
-                or "stard" in lower_p
-                or "fagan" in lower_p
-            ):
-                tool = self.tools.get("diagnostic_accuracy")
-                if tool:
-                    df = self._get_df(tool)
-                    if df is not None and not df.empty:
-                        cols = df.columns.tolist()
-                        idx_col = select_variable_by_keyword(
-                            cols,
-                            [
-                                "pocus",
-                                "index_test",
-                                "index",
-                                "test",
-                                "screening",
-                                "biomarker",
-                                "assay",
-                                "marker",
-                            ],
-                            default_to_first=False,
-                        )
-                        ref_col = select_variable_by_keyword(
-                            [c for c in cols if c != idx_col],
-                            [
-                                "gold_standard",
-                                "reference",
-                                "ref",
-                                "disease",
-                                "diagnosis",
-                                "status",
-                                "mortality",
-                                "death",
-                                "event",
-                                "outcome",
-                            ],
-                            default_to_first=False,
-                        )
-                        if not idx_col and len(cols) >= 1:
-                            idx_col = cols[0]
-                        if not ref_col and len(cols) >= 2:
-                            ref_col = [c for c in cols if c != idx_col][0]
-                        if idx_col and ref_col:
-                            return tool.forward(
-                                index_test_col=idx_col, ref_standard_col=ref_col
-                            )
-                        return "Error: Could not resolve valid index test and reference standard columns in active dataset for diagnostic accuracy."
-                    return "Error: No active dataset loaded in session for diagnostic accuracy. Please load a dataset with index and reference columns or specify all four 2x2 contingency counts (tp, fp, fn, tn)."
-            elif (
-                "rct" in lower_p
-                or "consort" in lower_p
-                or "randomized" in lower_p
-                or "relative risk" in lower_p
-            ):
-                tool = self.tools.get("binary_rct_analysis")
-                if tool:
-                    df = self._get_df(tool)
-                    if df is None or df.empty:
-                        return tool.forward(
-                            treatment_col="treatment", outcome_col="outcome"
-                        )
-                    cols = df.columns.tolist()
-                    t_col = select_variable_by_keyword(
-                        cols,
-                        [
-                            "treatment",
-                            "treat",
-                            "arm",
-                            "group",
-                            "intervention",
-                            "therapy",
-                            "rx",
-                        ],
-                        default_to_first=False,
-                    )
-                    o_col = select_variable_by_keyword(
-                        [c for c in cols if c != t_col],
-                        [
-                            "outcome",
                             "death",
                             "event",
-                            "status",
-                            "endpoint",
-                            "primary",
-                            "mortality",
-                            "response",
-                        ],
-                        default_to_first=False,
-                    )
-                    if not t_col and len(cols) >= 1:
-                        t_col = cols[0]
-                    if not o_col and len(cols) >= 2:
-                        o_col = [c for c in cols if c != t_col][0]
-                    if t_col and o_col:
-                        return tool.forward(treatment_col=t_col, outcome_col=o_col)
-                    return "Error: Could not resolve valid treatment and outcome columns in active dataset for RCT analysis."
-            elif (
-                "psm" in lower_p
-                or "propensity" in lower_p
-                or "nearest-neighbor" in lower_p
-            ):
-                tool = self.tools.get("propensity_score_matching")
-                if tool:
-                    df = self._get_df(tool)
-                    if df is None or df.empty:
-                        return tool.forward(
-                            treatment_col="treatment", covariate_cols=["age", "bmi"]
-                        )
-                    cols = df.columns.tolist()
-                    t_col = select_variable_by_keyword(
-                        cols,
-                        [
-                            "treatment",
-                            "treat",
-                            "arm",
-                            "group",
-                            "exposure",
-                            "intervention",
-                            "therapy",
-                        ],
-                        default_to_first=False,
-                    )
-                    if not t_col and cols:
-                        t_col = cols[0]
-                    covars = [c for c in cols if c != t_col]
-                    if t_col and covars:
-                        return tool.forward(
-                            treatment_col=t_col, covariate_cols=covars[:4]
-                        )
-                    return "Error: Could not resolve valid treatment indicator and covariate columns in active dataset for PSM."
-            elif "linear" in lower_p or "ols" in lower_p:
-                tool = self.tools.get("linear_regression")
-                if tool:
-                    df = self._get_df(tool)
-                    if df is None or df.empty:
-                        return tool.forward(
-                            outcome_col="outcome", predictor_cols=["age", "treatment"]
-                        )
-                    cols = df.columns.tolist()
-                    num_cols = df.select_dtypes(include=["number"]).columns.tolist()
-                    out_col = select_variable_by_keyword(
-                        num_cols or cols,
-                        [
                             "outcome",
-                            "continuous",
-                            "y",
-                            "target",
-                            "score",
-                            "sbp",
-                            "los",
-                            "creatinine",
-                            "bmi",
-                            "measurement",
                         ],
                         default_to_first=False,
                     )
-                    if not out_col and num_cols:
-                        out_col = num_cols[0]
-                    elif not out_col and cols:
-                        out_col = cols[0]
-                    preds = [c for c in cols if c != out_col]
-                    if out_col and preds:
-                        return tool.forward(
-                            outcome_col=out_col, predictor_cols=preds[:4]
+                    if not idx_col or not ref_col:
+                        return (
+                            "Error: Could not resolve valid index test and reference standard columns in active dataset for diagnostic accuracy. "
+                            "Please specify index test and gold standard reference columns."
                         )
-                    return "Error: Could not resolve valid continuous outcome and predictor columns in active dataset for linear regression."
-            elif "pubmed" in lower_p or "pico" in lower_p or "evidence" in lower_p:
-                tool = self.tools.get("pubmed_evidence_search")
-                if tool:
-                    return tool.forward(query=prompt, max_results=3)
-            elif "synthetic" in lower_p or "cohort" in lower_p:
-                tool = self.tools.get("synthetic_cohort_generator")
-                if tool:
-                    return tool.forward(n=100)
-            return f"Clinical AI Co-Pilot analysis for: {prompt}\n\nAll computations adhere to SAMPL guidelines and Zero-PHI security."
+                    if not _is_binary_column(df, idx_col) or not _is_binary_column(
+                        df, ref_col
+                    ):
+                        return "Error: Index test and reference standard columns must be binary (0/1 or 2 distinct categories)."
+
+                    from agent.critique_engine import CritiqueEngine
+
+                    text_out, fig, metrics_df, metrics = tool.run_with_dataframe(
+                        df=df, index_test_col=idx_col, ref_standard_col=ref_col
+                    )
+                    critique = CritiqueEngine.appraise_analysis(
+                        "diagnostic", df, metrics
+                    )
+                    return f"{text_out}\n\n---\n{critique.to_markdown()}"
+                return (
+                    "Error: No active dataset loaded in session for diagnostic accuracy. "
+                    "Please load a dataset with index and reference columns or specify all four 2x2 contingency counts (tp, fp, fn, tn)."
+                )
+
+        elif (
+            "rct" in lower_p
+            or "consort" in lower_p
+            or "randomized" in lower_p
+            or "relative risk" in lower_p
+        ):
+            tool = self.tools.get("binary_rct_analysis")
+            if tool:
+                df = self._get_df(tool)
+                if df is None or df.empty:
+                    return tool.forward(
+                        treatment_col="treatment", outcome_col="outcome"
+                    )
+                cols = df.columns.tolist()
+                t_col = select_variable_by_keyword(
+                    cols,
+                    [
+                        "study_arm",
+                        "treatment",
+                        "treat",
+                        "arm",
+                        "group",
+                        "intervention",
+                        "therapy",
+                        "rx",
+                    ],
+                    default_to_first=False,
+                )
+                o_col = select_variable_by_keyword(
+                    [c for c in cols if c != t_col],
+                    [
+                        "outcome",
+                        "death",
+                        "event",
+                        "status",
+                        "endpoint",
+                        "primary",
+                        "mortality",
+                        "response",
+                        "aki_endpoint",
+                    ],
+                    default_to_first=False,
+                )
+                if not t_col or not o_col:
+                    return (
+                        "Error: Could not resolve valid treatment and outcome columns in active dataset for RCT analysis. "
+                        "Please provide binary treatment and outcome column names."
+                    )
+                if not _is_binary_column(df, t_col) or not _is_binary_column(df, o_col):
+                    return "Error: Treatment and outcome columns in RCT analysis must be binary."
+
+                from agent.critique_engine import CritiqueEngine
+
+                text_out, fig, summary_df, metrics = tool.run_with_dataframe(
+                    df=df, treatment_col=t_col, outcome_col=o_col
+                )
+                critique = CritiqueEngine.appraise_analysis("rct", df, metrics)
+                return f"{text_out}\n\n---\n{critique.to_markdown()}"
+
+        elif (
+            "psm" in lower_p or "propensity" in lower_p or "nearest-neighbor" in lower_p
+        ):
+            tool = self.tools.get("propensity_score_matching")
+            if tool:
+                df = self._get_df(tool)
+                if df is None or df.empty:
+                    return tool.forward(
+                        treatment_col="treatment", covariate_cols=["age", "bmi"]
+                    )
+                cols = df.columns.tolist()
+                t_col = select_variable_by_keyword(
+                    cols,
+                    [
+                        "study_arm",
+                        "treatment",
+                        "treat",
+                        "arm",
+                        "group",
+                        "exposure",
+                        "intervention",
+                        "therapy",
+                    ],
+                    default_to_first=False,
+                )
+                if not t_col or not _is_binary_column(df, t_col):
+                    return (
+                        "Error: Could not resolve a valid binary treatment indicator column in active dataset for PSM. "
+                        "Please provide a binary treatment variable."
+                    )
+                covars = [
+                    c for c in cols if c != t_col and not _is_identifier_column(c)
+                ][:4]
+                if not covars:
+                    return "Error: No covariate columns available in active dataset for PSM."
+
+                from agent.critique_engine import CritiqueEngine
+
+                text_out, fig, df_matched, stats, balance_df = tool.run_with_dataframe(
+                    df=df, treatment_col=t_col, covariate_cols=covars
+                )
+                critique = CritiqueEngine.appraise_analysis("psm", df, stats)
+                return f"{text_out}\n\n---\n{critique.to_markdown()}"
+
+        elif "linear" in lower_p or "ols" in lower_p:
+            tool = self.tools.get("linear_regression")
+            if tool:
+                df = self._get_df(tool)
+                if df is None or df.empty:
+                    return tool.forward(
+                        outcome_col="outcome", predictor_cols=["age", "treatment"]
+                    )
+                cols = df.columns.tolist()
+                num_cols = df.select_dtypes(include=["number"]).columns.tolist()
+                out_col = select_variable_by_keyword(
+                    num_cols,
+                    [
+                        "outcome",
+                        "continuous",
+                        "y",
+                        "target",
+                        "score",
+                        "sbp_mmhg",
+                        "sbp",
+                        "los",
+                        "creatinine",
+                        "bmi_value",
+                        "bmi",
+                        "measurement",
+                    ],
+                    default_to_first=False,
+                )
+                if not out_col or not pd.api.types.is_numeric_dtype(df[out_col]):
+                    return (
+                        "Error: Could not resolve a valid continuous/numeric outcome column in active dataset for linear regression. "
+                        "Please provide an explicit numeric outcome column."
+                    )
+                preds = [
+                    c for c in cols if c != out_col and not _is_identifier_column(c)
+                ][:4]
+                if not preds:
+                    return "Error: No predictor columns available in active dataset for linear regression."
+
+                text_out, fig, coef_df, metrics = tool.run_with_dataframe(
+                    df=df, outcome_col=out_col, predictor_cols=preds
+                )
+                return text_out
+
+        elif "pubmed" in lower_p or "pico" in lower_p or "evidence" in lower_p:
+            tool = self.tools.get("pubmed_evidence_search")
+            if tool:
+                return tool.forward(query=prompt, max_results=3)
+        elif "synthetic" in lower_p or "cohort" in lower_p:
+            tool = self.tools.get("synthetic_cohort_generator")
+            if tool:
+                return tool.forward(n=100)
+        return f"Clinical AI Co-Pilot analysis for: {prompt}\n\nAll computations adhere to SAMPL guidelines and Zero-PHI security."
 
 
 CLINICAL_TECH_LEAD_SYSTEM_PROMPT = """

@@ -262,7 +262,7 @@ def test_ai_copilot_chat_submit_action_dynamic_critique():
 
 
 def test_ai_copilot_controls_non_interactive():
-    """Verify that unwired workspace, model, and storage controls are non-interactive."""
+    """Verify that unwired workspace, model, storage, and microphone controls are non-interactive."""
     import gradio as gr
 
     from views.view_ai_copilot import create_ai_copilot_view
@@ -273,3 +273,4 @@ def test_ai_copilot_controls_non_interactive():
     assert components["workspace_selector"].interactive is False
     assert components["model_dropdown"].interactive is False
     assert components["storage_dropdown"].interactive is False
+    assert components["btn_mic"].interactive is False

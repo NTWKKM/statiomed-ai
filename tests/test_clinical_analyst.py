@@ -270,3 +270,94 @@ def test_logistic_epv_with_predictor_missingness():
     assert new_state.last_analysis_type == "logistic"
     assert new_state.last_critique_md is not None
     assert "Severe EPV Deficit" in new_state.last_critique_md
+
+
+def test_dataset_reload_clears_cached_analysis_state(tmp_path):
+    # Setup state with previous analysis results and matched cohort
+    df_old = pd.DataFrame({"old_x": [1, 2, 3], "old_y": [0, 1, 0]})
+    df_matched_old = pd.DataFrame({"old_x": [1, 2], "old_y": [0, 1]})
+    state = AppState(
+        df=df_old,
+        file_name="old_cohort.csv",
+        df_matched=df_matched_old,
+        is_matched=True,
+        last_analysis_type="survival",
+        last_analysis_results={"km_stats": {"p_value": 0.04}},
+        last_critique_md="### Previous Appraisal",
+    )
+
+    # Ingest a new CSV dataset
+    new_csv_path = tmp_path / "new_dataset.csv"
+    pd.DataFrame(
+        {"time": [10, 20, 30], "death": [1, 0, 1], "treatment": [1, 0, 1]}
+    ).to_csv(new_csv_path, index=False)
+
+    resp_md, new_state, _fig, _df = ClinicalAnalystEngine.process_turn(
+        user_message="",
+        file_paths=[str(new_csv_path)],
+        state=state,
+    )
+
+    assert new_state.file_name == "new_dataset.csv"
+    assert new_state.is_matched is False
+    assert new_state.df_matched is None
+    assert new_state.last_analysis_type is None
+    assert new_state.last_analysis_results == {}
+    assert new_state.last_critique_md is None
+
+
+def test_synthetic_cohort_and_proposal_inspector_sync():
+    # 1. Synthetic survival (Case C)
+    state1 = AppState()
+    msg_synth = (
+        "สร้าง synthetic cohort สำหรับการทดลองรักษา SGLT2 inhibitor vs Standard care"
+    )
+    resp1, new_state1, _fig1, _ = ClinicalAnalystEngine.process_turn(
+        user_message=msg_synth,
+        file_paths=None,
+        state=state1,
+    )
+    assert new_state1.last_analysis_type == "survival"
+    assert new_state1.last_analysis_results is not None
+    assert "km_stats" in new_state1.last_analysis_results
+    assert new_state1.last_critique_md is not None
+    assert "Automated Clinical Critique & Appraisal" in new_state1.last_critique_md
+    assert "Automated Clinical Critique & Appraisal" in resp1
+
+    # 2. Proposal-triggered survival on active dataset (Case E)
+    df_surv = pd.DataFrame(
+        {
+            "time": [10, 20, 30, 40, 50] * 20,
+            "death": [1, 0, 1, 0, 1] * 20,
+            "treatment": [1, 1, 0, 0, 1] * 20,
+            "age": np.random.normal(60, 10, 100),
+        }
+    )
+    state2 = AppState(df=df_surv, file_name="active_trial.csv")
+    proposal_text = "PICO Framework\nPopulation: Heart failure patients\nIntervention: SGLT2i\nComparator: Placebo\nPrimary Outcome: All-cause mortality time to event"
+    resp2, new_state2, _fig2, _ = ClinicalAnalystEngine.process_turn(
+        user_message=proposal_text,
+        file_paths=None,
+        state=state2,
+    )
+    assert new_state2.last_analysis_type == "survival"
+    assert new_state2.last_critique_md is not None
+    assert "Automated Clinical Critique & Appraisal" in resp2
+
+    # 3. Proposal-triggered logistic regression on active dataset (Case E)
+    df_logit = pd.DataFrame(
+        {
+            "event": [1, 0, 1, 0, 1] * 20,
+            "treatment": [1, 1, 0, 0, 1] * 20,
+            "age": np.random.normal(60, 10, 100),
+        }
+    )
+    state3 = AppState(df=df_logit, file_name="binary_trial.csv")
+    resp3, new_state3, _fig3, _ = ClinicalAnalystEngine.process_turn(
+        user_message=proposal_text,
+        file_paths=None,
+        state=state3,
+    )
+    assert new_state3.last_analysis_type == "logistic"
+    assert new_state3.last_critique_md is not None
+    assert "Automated Clinical Critique & Appraisal" in resp3
