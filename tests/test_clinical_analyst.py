@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import pytest
+from lifelines import KaplanMeierFitter
 
 from agent.clinical_analyst import ClinicalAnalystEngine, StatHarness
 from agent.critique_engine import CritiqueEngine
@@ -366,17 +368,33 @@ def test_synthetic_cohort_and_proposal_inspector_sync():
 def test_coerce_to_binary_series_extended():
     from agent.clinical_analyst import _coerce_to_binary_series
 
-    # Numeric 1/2 coding (common in medical registries)
+    # Numeric 1/2 coding without explicit positive_val must raise ValueError (prohibits inference from numeric ordering)
     s1 = pd.Series([1, 2, 1, 2, 2])
-    res1 = _coerce_to_binary_series(s1)
-    assert list(res1) == [0, 1, 0, 1, 1]
+    with pytest.raises(
+        ValueError, match="Binary outcome column contains non-standard numeric values"
+    ):
+        _coerce_to_binary_series(s1)
 
-    # Negative/Positive numeric
+    # With explicit positive_val=2 (e.g. 2=Event, 1=Censored)
+    res1_p2 = _coerce_to_binary_series(s1, positive_val=2)
+    assert list(res1_p2) == [0, 1, 0, 1, 1]
+
+    # With explicit positive_val=1 (e.g. 1=Event, 2=Censored)
+    res1_p1 = _coerce_to_binary_series(s1, positive_val=1)
+    assert list(res1_p1) == [1, 0, 1, 0, 0]
+
+    # Negative/Positive numeric without positive_val must raise ValueError
     s2 = pd.Series([-1, 1, -1, 1])
-    res2 = _coerce_to_binary_series(s2)
+    with pytest.raises(
+        ValueError, match="Binary outcome column contains non-standard numeric values"
+    ):
+        _coerce_to_binary_series(s2)
+
+    # Negative/Positive numeric with explicit positive_val=1
+    res2 = _coerce_to_binary_series(s2, positive_val=1)
     assert list(res2) == [0, 1, 0, 1]
 
-    # Standard 0/1
+    # Standard 0/1 (explicit 0/1 outcomes preserved automatically)
     s3 = pd.Series([0, 1, 0, 1])
     res3 = _coerce_to_binary_series(s3)
     assert list(res3) == [0, 1, 0, 1]
@@ -396,6 +414,18 @@ def test_coerce_to_binary_series_extended():
     res_case = _coerce_to_binary_series(s_case)
     assert list(res_case) == [0, 1, 0]
 
+    # Ambiguous strings without positive_val must raise ValueError
+    s_ambig = pd.Series(["Cohort_A", "Cohort_B", "Cohort_A"])
+    with pytest.raises(
+        ValueError,
+        match="Binary outcome column contains unrecognized category values",
+    ):
+        _coerce_to_binary_series(s_ambig)
+
+    # Ambiguous strings with explicit positive_val
+    res_ambig = _coerce_to_binary_series(s_ambig, positive_val="Cohort_B")
+    assert list(res_ambig) == [0, 1, 0]
+
 
 def test_run_survival_with_non_standard_binary_event():
     np.random.seed(42)
@@ -410,17 +440,42 @@ def test_run_survival_with_non_standard_binary_event():
         }
     )
 
+    # Without positive_val, non-0/1 numeric raises ValueError for clinical safety
+    with pytest.raises(
+        ValueError, match="Binary outcome column contains non-standard numeric values"
+    ):
+        StatHarness.run_survival(
+            df=df,
+            time_col="time",
+            event_col="status",
+            group_col="treatment",
+            covar_cols=["age"],
+        )
+
+    # With explicit positive_val=2 (dead=2 is event, alive=1 is censored)
     fig, summary, meta = StatHarness.run_survival(
         df=df,
         time_col="time",
         event_col="status",
         group_col="treatment",
         covar_cols=["age"],
+        positive_val=2,
     )
 
     assert meta["fitted_events"] == 30
     assert meta["fitted_non_events"] == 30
     assert meta["fitted_non_events"] >= 0
+    assert meta["km_stats"]["km_events"] == 30
+    assert meta["km_stats"]["km_censored"] == 30
+
+    # Regression assertion: lifelines Kaplan-Meier event count matches fitted_events
+    # (verifying that lifelines received normalized 0/1 binary event series, avoiding treating 1 and 2 as all observed events)
+    kmf = KaplanMeierFitter()
+    norm_status = (df["status"] == 2).astype(int)
+    kmf.fit(df["time"], norm_status)
+    assert int(kmf.event_observed.sum()) == 30
+    assert int(kmf.event_observed.sum()) == meta["fitted_events"]
+    assert int((kmf.event_observed == 0).sum()) == meta["fitted_non_events"]
 
 
 def test_run_logistic_with_string_outcome():

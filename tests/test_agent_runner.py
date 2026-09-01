@@ -283,8 +283,9 @@ def test_psm_covariates_exclude_endpoints_and_outcomes():
         {
             "treatment": [1, 0, 1, 0] * 10,
             "patient_id": [f"P_{i}" for i in range(40)],
-            "age": [50, 60, 55, 65] * 10,
-            "bmi": [22.5, 27.1, 24.0, 29.3] * 10,
+            "age_years": [50, 60, 55, 65] * 10,
+            "baseline_status": [1, 0, 1, 0] * 10,
+            "smoking_status": [0, 1, 0, 1] * 10,
             "creatinine": [1.1, 0.9, 1.4, 0.8] * 10,
             "aki_endpoint": [1, 0, 0, 1] * 10,
             "death_status": [0, 1, 0, 0] * 10,
@@ -300,4 +301,9 @@ def test_psm_covariates_exclude_endpoints_and_outcomes():
     assert "death_status" not in resolved["covariate_cols"]
     assert "follow_up_days" not in resolved["covariate_cols"]
     assert "patient_id" not in resolved["covariate_cols"]
-    assert set(resolved["covariate_cols"]).issubset({"age", "bmi", "creatinine"})
+    assert "age_years" in resolved["covariate_cols"]
+    assert "baseline_status" in resolved["covariate_cols"]
+    assert "smoking_status" in resolved["covariate_cols"]
+    assert set(resolved["covariate_cols"]).issubset(
+        {"age_years", "baseline_status", "smoking_status", "creatinine"}
+    )

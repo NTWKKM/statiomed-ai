@@ -79,23 +79,14 @@ def _is_outcome_or_endpoint_column(col_name: str) -> bool:
         "endpoint",
         "outcome",
         "death",
-        "status",
-        "event",
-        "recurrence",
-        "response",
-        "target",
         "mortality",
-        "y",
-        "followup",
-        "follow_up",
-        "duration",
-        "time",
-        "days",
-        "months",
-        "years",
+        "recurrence",
+        "relapse",
         "surv_time",
         "os_months",
         "pfs_days",
+        "followup",
+        "follow_up",
     }
     if any(t in terms for t in tokens):
         return True
@@ -112,6 +103,8 @@ def _is_outcome_or_endpoint_column(col_name: str) -> bool:
             "follow_up",
             "followup",
             "surv_time",
+            "os_months",
+            "pfs_days",
         ]
     )
 

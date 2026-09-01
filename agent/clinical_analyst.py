@@ -38,20 +38,45 @@ from utils.visualizations import plot_missing_pattern
 logger = get_logger(__name__)
 
 
-def _coerce_to_binary_series(series: pd.Series) -> pd.Series:
-    """Coerces boolean, numeric, or string clinical labels to binary 0/1 integers."""
+def _coerce_to_binary_series(series: pd.Series, positive_val: Any = None) -> pd.Series:
+    """Coerces boolean, numeric, or string clinical labels to binary 0/1 integers.
+
+    Clinical Safety Rules:
+    - Explicit 0/1 numeric and boolean values are preserved automatically.
+    - If positive_val is specified, matching values are mapped to 1 and other non-null values to 0.
+    - Other numeric two-value series (e.g., {1, 2} or {-1, 1}) are NOT automatically inferred by numeric
+      ordering; an explicit positive_val is required, or a ValueError is raised.
+    - Unambiguous clinical string pairs (e.g. Alive/Dead, Control/Case) are mapped to 0/1; ambiguous pairs require positive_val.
+    """
+    if positive_val is not None:
+        if pd.api.types.is_numeric_dtype(series) and isinstance(
+            positive_val, (int, float, np.number)
+        ):
+            return (series == positive_val).astype(int)
+        s_str = series.astype(str).str.strip().str.lower()
+        pos_str = str(positive_val).strip().lower()
+        return (s_str == pos_str).astype(int)
+
     if pd.api.types.is_bool_dtype(series):
         return series.astype(int)
+
     if pd.api.types.is_numeric_dtype(series):
         clean_num = series.dropna()
         unique_vals = sorted(clean_num.unique())
         if set(unique_vals).issubset({0, 1}):
             return series.astype(int)
-        if len(unique_vals) == 2:
-            return (series == unique_vals[1]).astype(int)
         if len(unique_vals) == 1:
-            return pd.Series(1 if unique_vals[0] > 0 else 0, index=series.index)
-        return (series > 0).astype(int)
+            if unique_vals[0] in (0, 1):
+                return series.astype(int)
+            raise ValueError(
+                f"Binary outcome column contains single non-standard numeric value {unique_vals[0]}. "
+                "Explicit positive-event value required."
+            )
+        raise ValueError(
+            f"Binary outcome column contains non-standard numeric values {unique_vals}. "
+            "Automatic polarity inference from numeric ordering is prohibited for clinical safety. "
+            "Please specify an explicit positive-event value (positive_val) or map values to 0/1."
+        )
 
     # String / categorical / object mapping
     s_str = series.astype(str).str.strip().str.lower()
@@ -168,7 +193,11 @@ def _coerce_to_binary_series(series: pd.Series) -> pd.Series:
             return (s_str != val0).astype(int)
         if val1_neg and not val0_neg:
             return (s_str != val1).astype(int)
-        return (s_str == val1).astype(int)
+        raise ValueError(
+            f"Binary outcome column contains unrecognized category values {unique_s}. "
+            "Cannot unambiguously determine positive event. "
+            "Please specify an explicit positive-event value (positive_val) or map values to 0/1."
+        )
 
     def _map_val(v: str) -> int:
         if v in pos_tokens or any(
@@ -234,10 +263,16 @@ class StatHarness:
         event_col: str,
         group_col: str | None = None,
         covar_cols: list[str] | None = None,
+        positive_val: Any = None,
     ) -> tuple[go.Figure, pd.DataFrame, dict[str, Any]]:
         """Fits Kaplan-Meier Log-rank & Multivariable Cox Proportional Hazards."""
+        df_clean = df.copy()
+        df_clean[event_col] = _coerce_to_binary_series(
+            df_clean[event_col], positive_val=positive_val
+        )
+
         km_fig, km_summary, missing_info = survival_lib.fit_km_logrank(
-            df=df,
+            df=df_clean,
             duration_col=time_col,
             event_col=event_col,
             group_col=group_col,
@@ -257,7 +292,7 @@ class StatHarness:
         fitted_non_events = None
         if covar_cols and len(covar_cols) > 0:
             cph, res_df, clean_data, err, c_stats, _ = survival_lib.fit_cox_ph(
-                df=df,
+                df=df_clean,
                 duration_col=time_col,
                 event_col=event_col,
                 covariate_cols=covar_cols,
@@ -270,13 +305,15 @@ class StatHarness:
                     and not clean_data.empty
                     and event_col in clean_data.columns
                 ):
-                    event_bin = _coerce_to_binary_series(clean_data[event_col])
+                    event_bin = clean_data[event_col]
                     fitted_events = int((event_bin == 1).sum())
                     fitted_non_events = int((event_bin == 0).sum())
                 elif "Number of Events" in cox_stats:
                     try:
                         fitted_events = int(cox_stats["Number of Events"])
-                        n_obs = int(cox_stats.get("Number of Observations", len(df)))
+                        n_obs = int(
+                            cox_stats.get("Number of Observations", len(df_clean))
+                        )
                         fitted_non_events = max(0, n_obs - fitted_events)
                     except (ValueError, TypeError):
                         pass
@@ -299,11 +336,22 @@ class StatHarness:
                     except Exception as e:
                         logger.debug("Proportional hazards test exception: %s", e)
 
+        # Count KM events in the normalized dataset (matching lifelines fitting)
+        valid_km_rows = df_clean.dropna(subset=[time_col, event_col])
+        if group_col and group_col in df_clean.columns:
+            valid_km_rows = valid_km_rows.dropna(subset=[group_col])
+        km_events = int((valid_km_rows[event_col] == 1).sum())
+        km_censored = int((valid_km_rows[event_col] == 0).sum())
+
         return (
             km_fig,
             km_summary,
             {
-                "km_stats": {"p_value": p_val},
+                "km_stats": {
+                    "p_value": p_val,
+                    "km_events": km_events,
+                    "km_censored": km_censored,
+                },
                 "cox_df": cox_df,
                 "cox_stats": cox_stats,
                 "missing_info": missing_info,
@@ -470,14 +518,17 @@ class StatHarness:
             if idx_col in df.columns and ref_col in df.columns:
                 sub = df[[idx_col, ref_col]].dropna()
                 if not sub.empty:
-                    y_test = _coerce_to_binary_series(sub[idx_col])
-                    y_ref = _coerce_to_binary_series(sub[ref_col])
-                    calc_tp = int(((y_test == 1) & (y_ref == 1)).sum())
-                    calc_fp = int(((y_test == 1) & (y_ref == 0)).sum())
-                    calc_fn = int(((y_test == 0) & (y_ref == 1)).sum())
-                    calc_tn = int(((y_test == 0) & (y_ref == 0)).sum())
-                    index_test_col = idx_col
-                    ref_standard_col = ref_col
+                    try:
+                        y_test = _coerce_to_binary_series(sub[idx_col])
+                        y_ref = _coerce_to_binary_series(sub[ref_col])
+                        calc_tp = int(((y_test == 1) & (y_ref == 1)).sum())
+                        calc_fp = int(((y_test == 1) & (y_ref == 0)).sum())
+                        calc_fn = int(((y_test == 0) & (y_ref == 1)).sum())
+                        calc_tn = int(((y_test == 0) & (y_ref == 0)).sum())
+                        index_test_col = idx_col
+                        ref_standard_col = ref_col
+                    except ValueError:
+                        pass
 
         # Strict validation: require complete explicit 2x2 matrix or valid DataFrame inputs
         has_explicit = any(c is not None for c in (tp, fp, fn, tn))
@@ -1166,9 +1217,9 @@ class ClinicalAnalystEngine:
                         "ref",
                         "disease",
                         "diagnosis",
-                        "status",
-                        "mortality",
+                        "death_event",
                         "death",
+                        "mortality",
                         "event",
                         "outcome",
                     ],
