@@ -876,8 +876,12 @@ class ClinicalAnalystEngine:
                     df = load_data_robust(p)
                     state.df = df
                     state.file_name = p.name
+                    state.var_meta = {}
                     state.df_matched = None
                     state.is_matched = False
+                    state.matched_treatment_col = None
+                    state.matched_covariates = []
+                    state.mi_imputed_datasets = []
                     state.last_analysis_type = None
                     state.last_analysis_results = {}
                     state.last_critique_md = None

@@ -84,15 +84,16 @@ def test_tool_routing_non_canonical_columns():
     import numpy as np
     import pandas as pd
 
+    rng = np.random.default_rng(42)
     df_non_canonical = pd.DataFrame(
         {
             "follow_up_days": [10, 20, 30, 40, 50] * 20,
             "death_status": [1, 0, 1, 0, 1] * 20,
             "study_arm": [1, 1, 0, 0, 1] * 20,
             "aki_endpoint": [0, 1, 0, 1, 0] * 20,
-            "sbp_mmhg": np.random.normal(130, 15, 100),
-            "age_years": np.random.normal(60, 10, 100),
-            "bmi_value": np.random.normal(25, 4, 100),
+            "sbp_mmhg": rng.normal(130, 15, 100),
+            "age_years": rng.normal(60, 10, 100),
+            "bmi_value": rng.normal(25, 4, 100),
         }
     )
 
@@ -124,23 +125,25 @@ def test_tool_routing_non_canonical_columns():
     assert "`study_arm`" in res_psm
     assert "Automated Clinical Critique & Appraisal" in res_psm
 
-    # 5. Linear regression (OLS) with non-canonical columns: assert exact continuous outcome
+    # 5. Linear regression (OLS) with non-canonical columns: assert exact continuous outcome & appraisal
     res_linear = execute_agent_turn(agent, "Run linear regression ols")
     assert "Linear Regression" in res_linear
     assert "`sbp_mmhg`" in res_linear
+    assert "Automated Clinical Critique & Appraisal" in res_linear
 
 
 def test_cox_routing_passes_non_empty_covariates():
     import numpy as np
     import pandas as pd
 
+    rng = np.random.default_rng(42)
     df_cox = pd.DataFrame(
         {
             "follow_up_days": [10, 20, 30, 40, 50] * 20,
             "death_status": [1, 0, 1, 0, 1] * 20,
             "treatment": [1, 1, 0, 0, 1] * 20,
-            "age": np.random.normal(60, 10, 100),
-            "bmi": np.random.normal(25, 4, 100),
+            "age": rng.normal(60, 10, 100),
+            "bmi": rng.normal(25, 4, 100),
         }
     )
 
@@ -149,8 +152,8 @@ def test_cox_routing_passes_non_empty_covariates():
 
     assert "Cox Proportional Hazards" in res_cox
     assert "Multivariable Cox Proportional Hazards Model" in res_cox
-    # Check that covariates (e.g. treatment, age, bmi) were passed and included
-    assert "treatment" in res_cox or "age" in res_cox
+    # Check that covariates (e.g. age, bmi) were passed and included in model
+    assert "`age`" in res_cox or "age" in res_cox
     assert "Automated Clinical Critique & Appraisal" in res_cox
 
 
@@ -168,14 +171,101 @@ def test_tool_routing_rejects_unresolved_columns_without_positional_fallbacks():
 
     agent = create_clinical_agent(state_df_provider=lambda: df_ambiguous)
 
-    # Survival should return explicit column request error
+    # 1. Survival unresolved error
     res_surv = execute_agent_turn(agent, "Run survival analysis")
     assert "Error: Could not resolve valid time duration" in res_surv
 
-    # Logistic should return explicit binary outcome request error
+    # 2. Logistic unresolved error
     res_logit = execute_agent_turn(agent, "Run logistic regression")
     assert "Error: Could not resolve a valid binary outcome column" in res_logit
 
-    # RCT should return explicit column request error
+    # 3. RCT unresolved error
     res_rct = execute_agent_turn(agent, "Run RCT trial analysis")
     assert "Error: Could not resolve valid treatment and outcome columns" in res_rct
+
+    # 4. Diagnostic unresolved error
+    res_diag = execute_agent_turn(agent, "Run diagnostic accuracy evaluation")
+    assert (
+        "Error: Could not resolve valid index test and reference standard columns"
+        in res_diag
+    )
+
+    # 5. PSM unresolved error
+    res_psm = execute_agent_turn(agent, "Run propensity score matching psm")
+    assert (
+        "Error: Could not resolve a valid binary treatment indicator column" in res_psm
+    )
+
+    # 6. Linear unresolved error
+    res_linear = execute_agent_turn(agent, "Run linear regression ols")
+    assert (
+        "Error: Could not resolve a valid continuous/numeric outcome column"
+        in res_linear
+    )
+
+    # --- Validation Gate Failures ---
+
+    # Case A: Constant treatment (nunique=1) -> rejected by RCT and PSM
+    df_const_treat = pd.DataFrame(
+        {
+            "study_arm": [1] * 20,
+            "outcome": [0, 1] * 10,
+            "age": [50, 60] * 10,
+        }
+    )
+    agent_const = create_clinical_agent(state_df_provider=lambda: df_const_treat)
+    res_rct_const = execute_agent_turn(agent_const, "Analyze randomized trial consort")
+    assert (
+        "Error: Treatment and outcome columns in RCT analysis must be binary."
+        in res_rct_const
+    )
+
+    res_psm_const = execute_agent_turn(agent_const, "Run propensity score matching psm")
+    assert (
+        "Error: Could not resolve a valid binary treatment indicator column in active dataset for PSM."
+        in res_psm_const
+    )
+
+    # Case B: Non-numeric / string event labels ("Alive"/"Dead") -> rejected by Survival
+    df_str_event = pd.DataFrame(
+        {
+            "follow_up_days": [10, 20] * 10,
+            "death_status": ["Alive", "Dead"] * 10,
+        }
+    )
+    agent_str_event = create_clinical_agent(state_df_provider=lambda: df_str_event)
+    res_surv_str = execute_agent_turn(
+        agent_str_event, "Run survival analysis kaplan meier"
+    )
+    assert (
+        "Error: Could not resolve valid time duration and binary event indicator columns"
+        in res_surv_str
+    )
+
+    # Case C: Multiclass outcome (>2 distinct values) -> rejected by Logistic
+    df_multi_outcome = pd.DataFrame(
+        {
+            "outcome": [0, 1, 2] * 10,
+            "treatment": [0, 1] * 15,
+            "age": [50, 60, 70] * 10,
+        }
+    )
+    agent_multi = create_clinical_agent(state_df_provider=lambda: df_multi_outcome)
+    res_logit_multi = execute_agent_turn(
+        agent_multi, "Run multivariable logistic regression"
+    )
+    assert "Error: Could not resolve a valid binary outcome column" in res_logit_multi
+
+    # Case D: Non-numeric outcome -> rejected by Linear regression
+    df_str_outcome = pd.DataFrame(
+        {
+            "outcome": ["high", "low"] * 10,
+            "age": [50, 60] * 10,
+        }
+    )
+    agent_str_outcome = create_clinical_agent(state_df_provider=lambda: df_str_outcome)
+    res_linear_str = execute_agent_turn(agent_str_outcome, "Run linear regression ols")
+    assert (
+        "Error: Could not resolve a valid continuous/numeric outcome column"
+        in res_linear_str
+    )
