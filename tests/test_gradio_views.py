@@ -261,8 +261,8 @@ def test_ai_copilot_chat_submit_action_dynamic_critique():
     assert new_state2.has_data()
 
 
-def test_ai_copilot_controls_non_interactive():
-    """Verify that unwired workspace, model, storage, and microphone controls are non-interactive."""
+def test_ai_copilot_controls_interactivity():
+    """Verify that model_dropdown is interactive (wired to HF AI) while unwired workspace, storage, and microphone controls remain non-interactive."""
     import gradio as gr
 
     from views.view_ai_copilot import create_ai_copilot_view
@@ -271,6 +271,46 @@ def test_ai_copilot_controls_non_interactive():
         tab, components = create_ai_copilot_view(app_state=gr.State())
 
     assert components["workspace_selector"].interactive is False
-    assert components["model_dropdown"].interactive is False
+    assert components["model_dropdown"].interactive is True
     assert components["storage_dropdown"].interactive is False
     assert components["btn_mic"].interactive is False
+
+
+def test_settings_view_actions(monkeypatch):
+    """Verify settings save and HF connection test actions in Gradio Settings tab."""
+    import gradio as gr
+
+    from core.state import AppState
+    from views.view_settings import (
+        create_settings_view,
+        test_hf_connection_action,
+        update_settings_action,
+    )
+
+    state = AppState()
+    with gr.Blocks():
+        tab, components = create_settings_view(app_state=gr.State())
+
+    assert "btn_test_hf" in components
+    assert "btn_save" in components
+
+    # Test update settings action
+    save_html = update_settings_action(
+        ncbi_key="test_ncbi", hf_token="hf_test_123", state=state
+    )
+    assert "Settings updated successfully" in save_html
+    assert state.hf_token == "hf_test_123"
+
+    # Test HF connection test action (mocked)
+    from unittest.mock import MagicMock
+
+    mock_choice = MagicMock()
+    mock_choice.message.content = "StatioMed AI Connected: Ready"
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = MagicMock(choices=[mock_choice])
+    monkeypatch.setattr(
+        "agent.agent_runner.InferenceClient", lambda **kwargs: mock_client
+    )
+
+    test_html = test_hf_connection_action(hf_token="hf_test_123", state=state)
+    assert "Connected to Hugging Face AI" in test_html

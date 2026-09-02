@@ -307,3 +307,136 @@ def test_psm_covariates_exclude_endpoints_and_outcomes():
     assert set(resolved["covariate_cols"]).issubset(
         {"age_years", "baseline_status", "smoking_status", "creatinine"}
     )
+
+
+def test_resolve_hf_model_id():
+    from agent.agent_runner import resolve_hf_model_id
+
+    assert (
+        resolve_hf_model_id("Qwen 2.5 72B (Hugging Face)")
+        == "Qwen/Qwen2.5-72B-Instruct"
+    )
+    assert (
+        resolve_hf_model_id("Llama 3.3 70B (Hugging Face)")
+        == "meta-llama/Llama-3.3-70B-Instruct"
+    )
+    assert (
+        resolve_hf_model_id("DeepSeek R1 32B (Hugging Face)")
+        == "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
+    )
+    assert (
+        resolve_hf_model_id("Mistral Small 24B (Hugging Face)")
+        == "mistralai/Mistral-Small-24B-Instruct-2501"
+    )
+    assert resolve_hf_model_id("custom-org/my-model-v1") == "custom-org/my-model-v1"
+
+
+def test_clinical_agent_runner_token_discovery(monkeypatch):
+    from agent.agent_runner import ClinicalAgentRunner
+
+    # Test explicit token
+    assert ClinicalAgentRunner.get_token("explicit_token_123") == "explicit_token_123"
+
+    # Test environment variable
+    monkeypatch.setenv("HF_TOKEN", "env_hf_token_456")
+    assert ClinicalAgentRunner.get_token() == "env_hf_token_456"
+
+    # Test HUGGINGFACE_HUB_TOKEN fallback
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.setenv("HUGGINGFACE_HUB_TOKEN", "hub_token_789")
+    assert ClinicalAgentRunner.get_token() == "hub_token_789"
+
+
+def test_clinical_agent_runner_test_hf_connection(monkeypatch):
+    from unittest.mock import MagicMock
+    from agent.agent_runner import ClinicalAgentRunner
+
+    # Case 1: No token
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGINGFACE_HUB_TOKEN", raising=False)
+    monkeypatch.setattr("agent.agent_runner.hf_get_token", lambda: None)
+    monkeypatch.setattr(
+        "agent.agent_runner.ClinicalAgentRunner.get_token", lambda token=None: token
+    )
+    success, msg, details = ClinicalAgentRunner.test_hf_connection(token=None)
+    assert not success
+    assert "No Hugging Face" in msg
+
+    # Case 2: Successful connection with mocked InferenceClient
+    mock_choice = MagicMock()
+    mock_choice.message.content = "StatioMed AI Connected: Ready"
+    mock_response = MagicMock(choices=[mock_choice])
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+
+    monkeypatch.setattr(
+        "agent.agent_runner.InferenceClient", lambda **kwargs: mock_client
+    )
+
+    success_live, msg_live, details_live = ClinicalAgentRunner.test_hf_connection(
+        token="valid_mock_token_123", model_id="Qwen 2.5 72B"
+    )
+    assert success_live
+    assert "Connected to Hugging Face AI" in msg_live
+    assert details_live["model"] == "Qwen/Qwen2.5-72B-Instruct"
+
+    # Case 3: Failed connection (Inference error)
+    mock_failing_client = MagicMock()
+    mock_failing_client.chat.completions.create.side_effect = RuntimeError(
+        "Rate limit exceeded"
+    )
+    monkeypatch.setattr(
+        "agent.agent_runner.InferenceClient", lambda **kwargs: mock_failing_client
+    )
+
+    success_fail, msg_fail, details_fail = ClinicalAgentRunner.test_hf_connection(
+        token="valid_mock_token_123"
+    )
+    assert not success_fail
+    assert "Rate limit exceeded" in msg_fail
+
+
+def test_clinical_agent_runner_chat_completion(monkeypatch):
+    from unittest.mock import MagicMock
+    from agent.agent_runner import ClinicalAgentRunner
+
+    mock_choice = MagicMock()
+    mock_choice.message.content = (
+        "### Clinical Study Design\n- Primary Endpoint: All-cause mortality"
+    )
+    mock_response = MagicMock(choices=[mock_choice])
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+
+    monkeypatch.setattr(
+        "agent.agent_runner.InferenceClient", lambda **kwargs: mock_client
+    )
+    monkeypatch.setenv("HF_TOKEN", "mock_hf_token")
+
+    # 1. Chat completion
+    res = ClinicalAgentRunner.chat_completion(
+        [{"role": "user", "content": "hello"}], model_id="Qwen 2.5 72B"
+    )
+    assert res is not None
+    assert "All-cause mortality" in res
+
+    # 2. Extract terms
+    mock_choice.message.content = "sepsis septic shock ICU mortality"
+    terms = ClinicalAgentRunner.extract_biomedical_search_terms("septic patient in ICU")
+    assert "sepsis" in terms
+
+    # 3. Synthesize proposals
+    mock_choice.message.content = "### 5 Clinical Study Designs"
+    proposals = ClinicalAgentRunner.synthesize_proposals_with_llm("Acute dyspnea", [])
+    assert proposals is not None
+    assert "5 Clinical Study Designs" in proposals
+
+    # 4. Consult LLM
+    mock_choice.message.content = (
+        "Clinical Consultation: Recommend STROBE cohort design"
+    )
+    consult = ClinicalAgentRunner.consult_llm("How to analyze survival?", [])
+    assert consult is not None
+    assert "STROBE" in consult

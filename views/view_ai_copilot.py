@@ -90,6 +90,7 @@ def chat_submit_action(
     uploaded_files: list[Any] | None,
     chat_history: list[dict[str, str]],
     state: AppState,
+    model_name: str = "Qwen 2.5 72B (Hugging Face)",
 ) -> tuple[
     list[dict[str, str]],
     str,
@@ -137,10 +138,12 @@ def chat_submit_action(
     chat_history.append({"role": "user", "content": display_user_msg})
 
     try:
+        state.active_model = model_name
         response_md, new_state, fig, preview_df = ClinicalAnalystEngine.process_turn(
             user_message=msg_to_send,
             file_paths=files_list,
             state=state,
+            model_name=model_name,
         )
         chat_history.append({"role": "assistant", "content": response_md})
         fig_out = fig if fig is not None else go.Figure()
@@ -203,6 +206,7 @@ def handle_prompt_chip(
     prompt_text: str,
     chat_history: list[dict[str, str]],
     state: AppState,
+    model_name: str = "Qwen 2.5 72B (Hugging Face)",
 ) -> tuple[
     list[dict[str, str]],
     str,
@@ -219,6 +223,7 @@ def handle_prompt_chip(
         uploaded_files=None,
         chat_history=chat_history,
         state=state,
+        model_name=model_name,
     )
 
 
@@ -364,16 +369,17 @@ def create_ai_copilot_view(
                             )
                             model_dropdown = gr.Dropdown(
                                 choices=[
-                                    "Gemini 3.7 Flash High",
-                                    "Gemini 1.5 Pro (Clinical)",
-                                    "Qwen 2.5 72B (Inference Provider)",
-                                    "Local Biostat Engine (Zero-PHI)",
+                                    "Qwen 2.5 72B (Hugging Face)",
+                                    "Llama 3.3 70B (Hugging Face)",
+                                    "DeepSeek R1 32B (Hugging Face)",
+                                    "Mistral Small 24B (Hugging Face)",
+                                    "Local Deterministic Engine (Offline)",
                                 ],
-                                value="Gemini 3.7 Flash High",
+                                value="Qwen 2.5 72B (Hugging Face)",
                                 show_label=False,
                                 container=False,
                                 elem_classes=["clean-model-pill"],
-                                interactive=False,
+                                interactive=True,
                             )
 
                         # Right Toolbar Group: Mic icon & Circular Send button
@@ -470,7 +476,7 @@ def create_ai_copilot_view(
 
         btn_send.click(
             fn=chat_submit_action,
-            inputs=[chat_input, file_uploader, chatbot, app_state],
+            inputs=[chat_input, file_uploader, chatbot, app_state, model_dropdown],
             outputs=[
                 chatbot,
                 chat_input,
@@ -485,7 +491,7 @@ def create_ai_copilot_view(
 
         chat_input.submit(
             fn=chat_submit_action,
-            inputs=[chat_input, file_uploader, chatbot, app_state],
+            inputs=[chat_input, file_uploader, chatbot, app_state, model_dropdown],
             outputs=[
                 chatbot,
                 chat_input,
@@ -507,6 +513,7 @@ def create_ai_copilot_view(
                 ),
                 chatbot,
                 app_state,
+                model_dropdown,
             ],
             outputs=[
                 chatbot,
@@ -528,6 +535,7 @@ def create_ai_copilot_view(
                 ),
                 chatbot,
                 app_state,
+                model_dropdown,
             ],
             outputs=[
                 chatbot,
@@ -549,6 +557,7 @@ def create_ai_copilot_view(
                 ),
                 chatbot,
                 app_state,
+                model_dropdown,
             ],
             outputs=[
                 chatbot,
@@ -570,6 +579,7 @@ def create_ai_copilot_view(
                 ),
                 chatbot,
                 app_state,
+                model_dropdown,
             ],
             outputs=[
                 chatbot,
@@ -591,6 +601,7 @@ def create_ai_copilot_view(
                 ),
                 chatbot,
                 app_state,
+                model_dropdown,
             ],
             outputs=[
                 chatbot,
@@ -612,6 +623,7 @@ def create_ai_copilot_view(
                 ),
                 chatbot,
                 app_state,
+                model_dropdown,
             ],
             outputs=[
                 chatbot,
@@ -633,6 +645,7 @@ def create_ai_copilot_view(
                 ),
                 chatbot,
                 app_state,
+                model_dropdown,
             ],
             outputs=[
                 chatbot,
