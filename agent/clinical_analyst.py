@@ -21,7 +21,7 @@ import plotly.graph_objects as go
 import scipy.stats as stats
 
 from agent.agent_runner import ClinicalAgentRunner
-from agent.tools.tool_pubmed import PubMedEvidenceTool
+from agent.critique_engine import CritiqueEngine
 from agent.tools.tool_sample_size import SampleSizeTool
 from agent.tools.tool_synthetic_data import SyntheticDataTool
 from agent.topic_ideator import ClinicalTopicIdeator
@@ -38,21 +38,84 @@ from utils.visualizations import plot_missing_pattern
 logger = get_logger(__name__)
 
 
-def _coerce_to_binary_series(series: pd.Series) -> pd.Series:
-    """Coerces boolean, numeric, or string clinical labels to binary 0/1 integers."""
+def _extract_positive_val_from_message(msg: str) -> Any | None:
+    """Extracts explicit positive value parameter from user messages."""
+    if not msg:
+        return None
+    match = re.search(
+        r"(?:positive_val|pos_val|positive_value|event_val|positive|event)\s*[:=]\s*(?:['\"]([^'\"]+)['\"]|([^'\"\s,;]+))",
+        msg,
+        re.IGNORECASE,
+    )
+    if match:
+        raw = (match.group(1) or match.group(2)).strip()
+        if re.match(r"^-?\d+$", raw):
+            return int(raw)
+        try:
+            return float(raw)
+        except ValueError:
+            return raw
+    return None
+
+
+def _coerce_to_binary_series(series: pd.Series, positive_val: Any = None) -> pd.Series:
+    """Coerces boolean, numeric, or string clinical labels to binary 0/1 integers.
+
+    Clinical Safety Rules:
+    - Preserves missing source values as null in a nullable integer series (Int64).
+    - Explicit 0/1 numeric and boolean values are preserved automatically.
+    - If positive_val is specified, matching non-null values are mapped to 1 and other non-null values to 0.
+    - Other numeric two-value series (e.g., {1, 2} or {-1, 1}) are NOT automatically inferred by numeric
+      ordering; an explicit positive_val is required, or a ValueError is raised.
+    - Unambiguous clinical string pairs (e.g. Alive/Dead, Control/Case) are mapped to 0/1; ambiguous pairs require positive_val.
+    """
+    res = pd.Series(index=series.index, dtype="Int64")
+    non_null = series.dropna()
+    if non_null.empty:
+        return res
+
+    if positive_val is not None:
+        if pd.api.types.is_numeric_dtype(series) and isinstance(
+            positive_val, (int, float, np.number)
+        ):
+            res.loc[non_null.index] = (non_null == positive_val).astype(int)
+            return res
+        s_str = non_null.astype(str).str.strip().str.lower()
+        pos_str = str(positive_val).strip().lower()
+        res.loc[non_null.index] = (s_str == pos_str).astype(int)
+        return res
+
     if pd.api.types.is_bool_dtype(series):
-        return series.astype(int)
+        res.loc[non_null.index] = non_null.astype(int)
+        return res
+
     if pd.api.types.is_numeric_dtype(series):
-        unique_vals = set(series.dropna().unique())
-        if unique_vals.issubset({0, 1}):
-            return series.astype(int)
-        return (series > 0).astype(int)
-    # String / categorical mapping
-    s_str = series.astype(str).str.strip().str.lower()
+        unique_vals = sorted(non_null.unique())
+        if set(unique_vals).issubset({0, 1}):
+            res.loc[non_null.index] = non_null.astype(int)
+            return res
+        if len(unique_vals) == 1:
+            if unique_vals[0] in (0, 1):
+                res.loc[non_null.index] = non_null.astype(int)
+                return res
+            raise ValueError(
+                f"Binary outcome column contains single non-standard numeric value {unique_vals[0]}. "
+                "Explicit positive-event value required."
+            )
+        raise ValueError(
+            f"Binary outcome column contains non-standard numeric values {unique_vals}. "
+            "Automatic polarity inference from numeric ordering is prohibited for clinical safety. "
+            "Please specify an explicit positive-event value (positive_val) or map values to 0/1."
+        )
+
+    # String / categorical / object mapping
+    s_str = non_null.astype(str).str.strip().str.lower()
     pos_tokens = {
         "1",
+        "1.0",
         "true",
         "yes",
+        "y",
         "positive",
         "pos",
         "case",
@@ -61,15 +124,166 @@ def _coerce_to_binary_series(series: pd.Series) -> pd.Series:
         "intervention",
         "diseased",
         "reactive",
+        "dead",
+        "death",
+        "deceased",
+        "event",
+        "failure",
+        "relapse",
+        "recurrence",
+        "aki",
+        "stroke",
+        "mi",
+        "mortality",
+        "treated",
     }
-    return s_str.apply(
-        lambda v: 1
+    neg_tokens = {
+        "0",
+        "0.0",
+        "false",
+        "no",
+        "n",
+        "negative",
+        "neg",
+        "control",
+        "absent",
+        "normal",
+        "alive",
+        "survived",
+        "none",
+        "non-event",
+        "cured",
+        "intact",
+        "placebo",
+        "healthy",
+        "standard",
+        "standard of care",
+        "soc",
+        "sham",
+        "comparator",
+        "conventional",
+    }
+
+    def _classify_token(v: str) -> str | None:
+        if v in neg_tokens:
+            return "neg"
+        if v in pos_tokens:
+            return "pos"
         if (
-            v in pos_tokens
-            or any(tok in v for tok in ["pos", "true", "abnormal", "yes"])
+            v.startswith("non-")
+            or v.startswith("non_")
+            or v.startswith("no ")
+            or v.startswith("not ")
+            or v.endswith("-free")
+            or v.endswith("_free")
+            or "non-event" in v
+            or "non_event" in v
+            or "nonevent" in v
+            or "disease-free" in v
+        ):
+            return "neg"
+        if any(
+            tok in v
+            for tok in [
+                "pos",
+                "true",
+                "abnormal",
+                "dead",
+                "death",
+                "deceased",
+                "event",
+                "relapse",
+                "recurrence",
+                "failure",
+                "diseased",
+                "reactive",
+                "stroke",
+                "mortality",
+                "case",
+                "present",
+                "treated",
+                "treatment",
+                "intervention",
+                "immunotherapy",
+                "experimental",
+                "investigational",
+                "active",
+            ]
+        ):
+            return "pos"
+        if any(
+            tok in v
+            for tok in [
+                "neg",
+                "false",
+                "normal",
+                "alive",
+                "control",
+                "placebo",
+                "survive",
+                "cured",
+                "intact",
+                "healthy",
+                "absent",
+                "standard",
+                "conventional",
+                "sham",
+                "comparator",
+            ]
+        ):
+            return "neg"
+        return None
+
+    # If exactly 2 distinct string values present, evaluate against token dictionaries
+    unique_s = sorted(s_str.unique())
+    if len(unique_s) == 2:
+        val0, val1 = unique_s[0], unique_s[1]
+        c0 = _classify_token(val0)
+        c1 = _classify_token(val1)
+
+        val0_pos = c0 == "pos"
+        val1_pos = c1 == "pos"
+        val0_neg = c0 == "neg"
+        val1_neg = c1 == "neg"
+
+        if val1_pos and (val0_neg or not val0_pos):
+            res.loc[non_null.index] = (s_str == val1).astype(int)
+            return res
+        if val0_pos and (val1_neg or not val1_pos):
+            res.loc[non_null.index] = (s_str == val0).astype(int)
+            return res
+        if val0_neg and not val1_neg:
+            res.loc[non_null.index] = (s_str != val0).astype(int)
+            return res
+        if val1_neg and not val0_neg:
+            res.loc[non_null.index] = (s_str != val1).astype(int)
+            return res
+        raise ValueError(
+            f"Binary outcome column contains unrecognized category values {unique_s}. "
+            "Cannot unambiguously determine positive event. "
+            "Please specify an explicit positive-event value (positive_val) or map values to 0/1."
         )
-        else 0
-    )
+
+    mapped_vals = {}
+    unrecognized = []
+    for u in unique_s:
+        c = _classify_token(u)
+        if c == "pos":
+            mapped_vals[u] = 1
+        elif c == "neg":
+            mapped_vals[u] = 0
+        else:
+            unrecognized.append(u)
+
+    if unrecognized:
+        raise ValueError(
+            f"Binary outcome column contains unrecognized category values {unrecognized}. "
+            "Cannot unambiguously determine positive event. "
+            "Please specify an explicit positive-event value (positive_val) or map values to 0/1."
+        )
+
+    res.loc[non_null.index] = s_str.map(mapped_vals).astype(int)
+    return res
 
 
 @dataclass
@@ -115,10 +329,16 @@ class StatHarness:
         event_col: str,
         group_col: str | None = None,
         covar_cols: list[str] | None = None,
+        positive_val: Any = None,
     ) -> tuple[go.Figure, pd.DataFrame, dict[str, Any]]:
         """Fits Kaplan-Meier Log-rank & Multivariable Cox Proportional Hazards."""
+        df_clean = df.copy()
+        df_clean[event_col] = _coerce_to_binary_series(
+            df_clean[event_col], positive_val=positive_val
+        )
+
         km_fig, km_summary, missing_info = survival_lib.fit_km_logrank(
-            df=df,
+            df=df_clean,
             duration_col=time_col,
             event_col=event_col,
             group_col=group_col,
@@ -134,9 +354,11 @@ class StatHarness:
 
         cox_df = None
         cox_stats = {}
+        fitted_events = None
+        fitted_non_events = None
         if covar_cols and len(covar_cols) > 0:
-            cph, res_df, _, err, c_stats, _ = survival_lib.fit_cox_ph(
-                df=df,
+            cph, res_df, clean_data, err, c_stats, _ = survival_lib.fit_cox_ph(
+                df=df_clean,
                 duration_col=time_col,
                 event_col=event_col,
                 covariate_cols=covar_cols,
@@ -144,15 +366,63 @@ class StatHarness:
             if not err and res_df is not None:
                 cox_df = res_df
                 cox_stats = c_stats or {}
+                if (
+                    clean_data is not None
+                    and not clean_data.empty
+                    and event_col in clean_data.columns
+                ):
+                    event_bin = clean_data[event_col]
+                    fitted_events = int((event_bin == 1).sum())
+                    fitted_non_events = int((event_bin == 0).sum())
+                elif "Number of Events" in cox_stats:
+                    try:
+                        fitted_events = int(cox_stats["Number of Events"])
+                        n_obs = int(
+                            cox_stats.get("Number of Observations", len(df_clean))
+                        )
+                        fitted_non_events = max(0, n_obs - fitted_events)
+                    except (ValueError, TypeError):
+                        pass
+                if cph is not None and hasattr(cph, "compute_residuals"):
+                    try:
+                        from lifelines.statistics import proportional_hazard_test
+
+                        ph_res = proportional_hazard_test(
+                            cph, clean_data, time_transform="rank"
+                        )
+                        min_p = (
+                            float(ph_res.summary["p"].min())
+                            if not ph_res.summary.empty
+                            else 1.0
+                        )
+                        cox_stats["ph_diagnostic"] = {
+                            "passed": bool(min_p >= 0.05),
+                            "p_value": min_p,
+                        }
+                    except Exception as e:
+                        logger.debug("Proportional hazards test exception: %s", e)
+
+        # Count KM events in the normalized dataset (matching lifelines fitting)
+        valid_km_rows = df_clean.dropna(subset=[time_col, event_col])
+        if group_col and group_col in df_clean.columns:
+            valid_km_rows = valid_km_rows.dropna(subset=[group_col])
+        km_events = int((valid_km_rows[event_col] == 1).sum())
+        km_censored = int((valid_km_rows[event_col] == 0).sum())
 
         return (
             km_fig,
             km_summary,
             {
-                "km_stats": {"p_value": p_val},
+                "km_stats": {
+                    "p_value": p_val,
+                    "km_events": km_events,
+                    "km_censored": km_censored,
+                },
                 "cox_df": cox_df,
                 "cox_stats": cox_stats,
                 "missing_info": missing_info,
+                "fitted_events": fitted_events,
+                "fitted_non_events": fitted_non_events,
             },
         )
 
@@ -161,14 +431,26 @@ class StatHarness:
         df: pd.DataFrame,
         outcome_col: str,
         predictor_cols: list[str],
+        positive_val: Any = None,
     ) -> tuple[pd.DataFrame, dict[str, Any], go.Figure]:
         """Fits binary logistic regression with Odds Ratios and 95% CIs."""
         clean_cols = [outcome_col] + [c for c in predictor_cols if c in df.columns]
-        df_clean = df[clean_cols].dropna()
+        df_clean = df[clean_cols].dropna().copy()
+
+        clean_y = _coerce_to_binary_series(
+            df_clean[outcome_col], positive_val=positive_val
+        )
+        fitted_events = int((clean_y == 1).sum())
+        fitted_non_events = int((clean_y == 0).sum())
+        df_clean[outcome_col] = clean_y.astype(int)
 
         html_table, or_results, status, metrics = logic.run_logistic_regression(
             df=df_clean, outcome_col=outcome_col, covariate_cols=predictor_cols
         )
+        metrics = metrics or {}
+        metrics["n_clean"] = len(df_clean)
+        metrics["fitted_events"] = fitted_events
+        metrics["fitted_non_events"] = fitted_non_events
         rows = []
         if or_results:
             for var_name, r in or_results.items():
@@ -258,6 +540,9 @@ class StatHarness:
         fp: int | None = None,
         fn: int | None = None,
         tn: int | None = None,
+        positive_val: Any = None,
+        index_positive_val: Any = None,
+        ref_positive_val: Any = None,
     ) -> tuple[pd.DataFrame, dict[str, Any], go.Figure]:
         """Calculates Diagnostic Test Accuracy (STARD 2015) & Bayesian Fagan Nomogram."""
         calc_tp, calc_fp, calc_fn, calc_tn = None, None, None, None
@@ -305,14 +590,31 @@ class StatHarness:
             if idx_col in df.columns and ref_col in df.columns:
                 sub = df[[idx_col, ref_col]].dropna()
                 if not sub.empty:
-                    y_test = _coerce_to_binary_series(sub[idx_col])
-                    y_ref = _coerce_to_binary_series(sub[ref_col])
-                    calc_tp = int(((y_test == 1) & (y_ref == 1)).sum())
-                    calc_fp = int(((y_test == 1) & (y_ref == 0)).sum())
-                    calc_fn = int(((y_test == 0) & (y_ref == 1)).sum())
-                    calc_tn = int(((y_test == 0) & (y_ref == 0)).sum())
-                    index_test_col = idx_col
-                    ref_standard_col = ref_col
+                    try:
+                        idx_pos = (
+                            index_positive_val
+                            if index_positive_val is not None
+                            else positive_val
+                        )
+                        ref_pos = (
+                            ref_positive_val
+                            if ref_positive_val is not None
+                            else positive_val
+                        )
+                        y_test = _coerce_to_binary_series(
+                            sub[idx_col], positive_val=idx_pos
+                        )
+                        y_ref = _coerce_to_binary_series(
+                            sub[ref_col], positive_val=ref_pos
+                        )
+                        calc_tp = int(((y_test == 1) & (y_ref == 1)).sum())
+                        calc_fp = int(((y_test == 1) & (y_ref == 0)).sum())
+                        calc_fn = int(((y_test == 0) & (y_ref == 1)).sum())
+                        calc_tn = int(((y_test == 0) & (y_ref == 0)).sum())
+                        index_test_col = idx_col
+                        ref_standard_col = ref_col
+                    except ValueError:
+                        pass
 
         # Strict validation: require complete explicit 2x2 matrix or valid DataFrame inputs
         has_explicit = any(c is not None for c in (tp, fp, fn, tn))
@@ -477,6 +779,9 @@ class StatHarness:
         df: pd.DataFrame,
         treatment_col: str,
         outcome_col: str,
+        positive_val: Any = None,
+        treatment_positive_val: Any = None,
+        outcome_positive_val: Any = None,
     ) -> tuple[pd.DataFrame, dict[str, Any], go.Figure]:
         """
         Evaluates a 2-arm Randomized Controlled Trial (CONSORT compliant) for binary primary outcomes.
@@ -484,8 +789,12 @@ class StatHarness:
         Relative Risk Reduction (RRR), and Number Needed to Treat (NNT) with 95% Confidence Intervals.
         """
         clean_df = df[[treatment_col, outcome_col]].dropna()
-        t_bin = _coerce_to_binary_series(clean_df[treatment_col])
-        y_bin = _coerce_to_binary_series(clean_df[outcome_col])
+        t_pos = treatment_positive_val
+        y_pos = (
+            outcome_positive_val if outcome_positive_val is not None else positive_val
+        )
+        t_bin = _coerce_to_binary_series(clean_df[treatment_col], positive_val=t_pos)
+        y_bin = _coerce_to_binary_series(clean_df[outcome_col], positive_val=y_pos)
 
         # Control (0) vs Intervention (1)
         n_ctrl = int((t_bin == 0).sum())
@@ -669,6 +978,8 @@ class StatHarness:
         outcome_col: str | None = None,
         caliper: float = 0.20,
         ratio: int = 1,
+        positive_val: Any = None,
+        outcome_positive_val: Any = None,
     ) -> tuple[pd.DataFrame, dict[str, Any], go.Figure, pd.DataFrame]:
         """
         Executes 1:1 Nearest-Neighbor Propensity Score Matching (PSM),
@@ -739,10 +1050,16 @@ class StatHarness:
             ].dropna()
             if not clean_matched.empty:
                 try:
+                    outcome_pos = (
+                        outcome_positive_val
+                        if outcome_positive_val is not None
+                        else positive_val
+                    )
                     matched_coef_df, matched_metrics, _ = StatHarness.run_logistic(
                         clean_matched,
                         outcome_col=outcome_col,
                         predictor_cols=[treatment_col] + covariate_cols,
+                        positive_val=outcome_pos,
                     )
                     matched_outcome_stats = matched_metrics
                 except Exception as e:
@@ -815,6 +1132,7 @@ class ClinicalAnalystEngine:
         user_msg = (user_message or "").strip()
         lower_msg = user_msg.lower()
         file_paths = file_paths or []
+        extracted_pos_val = _extract_positive_val_from_message(user_msg)
 
         proposal_meta: ProposalMetadata | None = None
         loaded_new_data = False
@@ -832,8 +1150,16 @@ class ClinicalAnalystEngine:
                     df = load_data_robust(p)
                     state.df = df
                     state.file_name = p.name
+                    state.file_size_bytes = p.stat().st_size if p.exists() else 0
+                    state.var_meta = {}
                     state.df_matched = None
                     state.is_matched = False
+                    state.matched_treatment_col = None
+                    state.matched_covariates = []
+                    state.mi_imputed_datasets = []
+                    state.last_analysis_type = None
+                    state.last_analysis_results = {}
+                    state.last_critique_md = None
                     loaded_new_data = True
                 except Exception as e:
                     logger.error(f"Error loading dataset {p.name}: {e}")
@@ -894,7 +1220,12 @@ class ClinicalAnalystEngine:
                     df_gen,
                     treatment_col=t_col,
                     outcome_col=o_col,
+                    positive_val=extracted_pos_val,
                 )
+                critique = CritiqueEngine.appraise_analysis("rct", df_gen, metrics)
+                state.last_analysis_type = "rct"
+                state.last_analysis_results = metrics
+                state.last_critique_md = critique.to_markdown()
                 response_md = f"""### 🚀 Executing Option {opt_id} (Randomized Controlled Trial - CONSORT 2010)
 
 **Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} patients)
@@ -913,6 +1244,9 @@ class ClinicalAnalystEngine:
 - **Fisher's Exact Test:** P-value = **`{metrics["fisher_p"]:.4f}`** (Odds Ratio = `{metrics["fisher_or"]:.3f}`)
 
 {summary_df.to_markdown(index=False)}
+
+---
+{critique.to_markdown()}
 """
                 return response_md, state, fig, df_gen
             elif opt_id == 2 and time_col and event_col:
@@ -922,13 +1256,42 @@ class ClinicalAnalystEngine:
                     event_col=event_col,
                     group_col=treat_col,
                     covar_cols=covars,
+                    positive_val=extracted_pos_val,
                 )
-                km_p_val = stats_dict.get("km_stats", {}).get("p_value", "N/A")
+                km_stats = stats_dict.get("km_stats", {})
+                km_p_val = km_stats.get("p_value", "N/A")
                 km_p_val_str = (
                     f"{km_p_val:.4f}"
                     if isinstance(km_p_val, (int, float))
                     else str(km_p_val)
                 )
+                km_events = km_stats.get("km_events")
+                km_censored = km_stats.get("km_censored")
+                if km_events is not None and km_censored is not None:
+                    events_str = f"`{km_events}` out of `{km_events + km_censored}`"
+                else:
+                    raw_ev = (
+                        df_gen[event_col].sum()
+                        if event_col in df_gen.columns
+                        and pd.api.types.is_numeric_dtype(df_gen[event_col])
+                        else "N/A"
+                    )
+                    events_str = f"`{raw_ev}` out of `{len(df_gen)}`"
+                critique = CritiqueEngine.appraise_analysis(
+                    "survival",
+                    df_gen,
+                    {
+                        "time_col": time_col,
+                        "event_col": event_col,
+                        "covar_cols": covars,
+                        "cox_stats": stats_dict.get("cox_stats", {}),
+                        "fitted_events": stats_dict.get("fitted_events"),
+                        "fitted_non_events": stats_dict.get("fitted_non_events"),
+                    },
+                )
+                state.last_analysis_type = "survival"
+                state.last_analysis_results = stats_dict
+                state.last_critique_md = critique.to_markdown()
                 response_md = f"""### 🚀 Executing Option {opt_id} (Kaplan-Meier & Cox Proportional Hazards - STROBE)
 
 **Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} patients)
@@ -936,11 +1299,14 @@ class ClinicalAnalystEngine:
 #### 1. Kaplan-Meier Survival Analysis & Log-Rank Test:
 - **Duration / Time:** `{time_col}` | **Event / Status:** `{event_col}`
 - **Log-Rank P-value:** `{km_p_val_str}`
-- **Total Observed Events:** `{df_gen[event_col].sum() if event_col in df_gen.columns else "N/A"}` out of `{len(df_gen)}` subjects
+- **Total Observed Events:** {events_str} subjects
 
 #### 2. Multivariable Cox Proportional Hazards Model:
 - **Confounders Adjusted:** {", ".join([f"`{c}`" for c in covars]) if covars else "None"}
 - **Status:** Cohort saved to session state and Kaplan-Meier plot rendered in the Visual Output panel.
+
+---
+{critique.to_markdown()}
 """
                 return response_md, state, fig, df_gen
             elif opt_id == 3:
@@ -968,9 +1334,9 @@ class ClinicalAnalystEngine:
                         "ref",
                         "disease",
                         "diagnosis",
-                        "status",
-                        "mortality",
+                        "death_event",
                         "death",
+                        "mortality",
                         "event",
                         "outcome",
                     ],
@@ -980,12 +1346,19 @@ class ClinicalAnalystEngine:
                     df_gen,
                     index_test_col=idx_col,
                     ref_standard_col=ref_col,
+                    positive_val=extracted_pos_val,
                 )
                 matrix_label = (
                     "2x2 Matrix Counts (Demonstration Example Data)"
                     if metrics.get("used_example_counts")
                     else "2x2 Matrix Counts (Derived from Cohort)"
                 )
+                critique = CritiqueEngine.appraise_analysis(
+                    "diagnostic", df_gen, metrics
+                )
+                state.last_analysis_type = "diagnostic"
+                state.last_analysis_results = metrics
+                state.last_critique_md = critique.to_markdown()
                 response_md = f"""### 🚀 Executing Option {opt_id} (Diagnostic Accuracy & Fagan Nomogram - STARD 2015)
 
 **Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} subjects)
@@ -1003,6 +1376,9 @@ class ClinicalAnalystEngine:
 - **Post-Test Probability (Negative Test):** `{metrics["post_prob_neg"]:.1f}%`
 
 {metrics_df.to_markdown(index=False)}
+
+---
+{critique.to_markdown()}
 """
                 return response_md, state, fig, df_gen
             elif opt_id == 4:
@@ -1012,7 +1388,22 @@ class ClinicalAnalystEngine:
                     df_gen,
                     outcome_col=o_col,
                     predictor_cols=p_cols,
+                    positive_val=extracted_pos_val,
                 )
+                critique = CritiqueEngine.appraise_analysis(
+                    "logistic",
+                    df_gen,
+                    {
+                        "outcome_col": o_col,
+                        "predictor_cols": p_cols,
+                        "coef_df": coef_df,
+                        "fitted_events": metrics.get("fitted_events"),
+                        "fitted_non_events": metrics.get("fitted_non_events"),
+                    },
+                )
+                state.last_analysis_type = "logistic"
+                state.last_analysis_results = metrics
+                state.last_critique_md = critique.to_markdown()
                 response_md = f"""### 🚀 Executing Option {opt_id} (Clinical Prediction Model - TRIPOD+AI)
 
 **Dataset:** `{state.file_name}` (n = {len(df_gen):,} records)  
@@ -1021,6 +1412,9 @@ class ClinicalAnalystEngine:
 
 #### Odds Ratios & Multivariable Model Summary:
 {coef_df.to_markdown(index=False)}
+
+---
+{critique.to_markdown()}
 """
                 return response_md, state, fig, df_gen
             elif opt_id == 5:
@@ -1035,6 +1429,7 @@ class ClinicalAnalystEngine:
                     outcome_col=o_col,
                     caliper=0.20,
                     ratio=1,
+                    positive_val=extracted_pos_val,
                 )
 
                 state.df_matched = df_matched
@@ -1052,6 +1447,10 @@ class ClinicalAnalystEngine:
 {stats_dict["matched_coef_df"].to_markdown(index=False)}
 """
 
+                critique = CritiqueEngine.appraise_analysis("psm", df_gen, stats_dict)
+                state.last_analysis_type = "psm"
+                state.last_analysis_results = stats_dict
+                state.last_critique_md = critique.to_markdown()
                 response_md = f"""### 🚀 Executing Option {opt_id} (Propensity Score Matching & Causal Inference)
 
 **Generated Synthetic Cohort:** `{state.file_name}` (n = {len(df_gen):,} records)
@@ -1066,6 +1465,9 @@ class ClinicalAnalystEngine:
 #### 2. Covariate Balance Assessment (Love Plot & SMD):
 {balance_df.to_markdown(index=False) if not balance_df.empty else "No covariate balance table available."}
 {matched_reg_md}
+
+---
+{critique.to_markdown()}
 """
                 return response_md, state, fig, df_gen
             else:
@@ -1186,15 +1588,48 @@ Dataset saved to session and ready for downstream analysis.
 
             fig = go.Figure()
             stats_dict = {}
+            critique_md = ""
             if time_col and event_col:
                 fig, km_df, stats_dict = StatHarness.run_survival(
-                    df_gen, time_col=time_col, event_col=event_col, group_col=treat_col
+                    df_gen,
+                    time_col=time_col,
+                    event_col=event_col,
+                    group_col=treat_col,
+                    positive_val=extracted_pos_val,
                 )
+                critique = CritiqueEngine.appraise_analysis(
+                    "survival",
+                    df_gen,
+                    {
+                        "time_col": time_col,
+                        "event_col": event_col,
+                        "cox_stats": stats_dict.get("cox_stats", {}),
+                        "fitted_events": stats_dict.get("fitted_events"),
+                        "fitted_non_events": stats_dict.get("fitted_non_events"),
+                    },
+                )
+                state.last_analysis_type = "survival"
+                state.last_analysis_results = stats_dict
+                state.last_critique_md = critique.to_markdown()
+                critique_md = f"\n---\n{critique.to_markdown()}"
 
-            km_p_val = stats_dict.get("km_stats", {}).get("p_value", "N/A")
+            km_stats = stats_dict.get("km_stats", {})
+            km_p_val = km_stats.get("p_value", "N/A")
             km_p_val_str = (
                 f"{km_p_val:.4f}" if isinstance(km_p_val, float) else str(km_p_val)
             )
+            km_events = km_stats.get("km_events")
+            if km_events is not None:
+                events_display = f"`{km_events}` events"
+            else:
+                raw_ev = (
+                    df_gen[event_col].sum()
+                    if event_col
+                    and event_col in df_gen.columns
+                    and pd.api.types.is_numeric_dtype(df_gen[event_col])
+                    else "N/A"
+                )
+                events_display = f"`{raw_ev}` events"
 
             pico = meta.get("pico", {})
             response_md = f"""### 🧬 Synthetic Clinical Cohort Generated Successfully
@@ -1212,8 +1647,9 @@ Dataset saved to session and ready for downstream analysis.
 #### 🚀 Immediate Statistical Execution:
 1. **Kaplan-Meier Survival Analysis:** Fit survival curves stratified by treatment arm (`{treat_col}`)
    - **Log-Rank Test P-value:** `{km_p_val_str}`
-   - **Total Events:** `{df_gen[event_col].sum() if event_col else "N/A"}` events
+   - **Total Events:** {events_display}
 2. **Session State Synced:** You can now switch to **📊 Data Profiler**, **📈 Regression**, or **👥 Table 1 & Matching** tabs for further in-depth analysis.
+{critique_md}
 """
             return response_md, state, fig, df_gen
 
@@ -1277,13 +1713,30 @@ Dataset saved to session and ready for downstream analysis.
                 df = state.df
                 cols = df.columns.tolist()
                 time_col = select_variable_by_keyword(
-                    cols, ["time", "duration", "days", "fu_time"]
+                    cols,
+                    [
+                        "time",
+                        "duration",
+                        "days",
+                        "fu_time",
+                        "followup",
+                        "follow_up",
+                        "surv_time",
+                    ],
+                    default_to_first=False,
                 )
+                if time_col and not pd.api.types.is_numeric_dtype(df[time_col]):
+                    time_col = None
+
                 event_col = select_variable_by_keyword(
-                    cols, ["death", "event", "status", "mortality"]
+                    [c for c in cols if c != time_col],
+                    ["death", "event", "status", "mortality"],
+                    default_to_first=False,
                 )
                 treat_col = select_variable_by_keyword(
-                    cols, ["treatment", "group", "arm", "therapy"]
+                    [c for c in cols if c not in [time_col, event_col]],
+                    ["treatment", "group", "arm", "therapy"],
+                    default_to_first=False,
                 )
                 covar_candidates = [
                     c
@@ -1302,11 +1755,27 @@ Dataset saved to session and ready for downstream analysis.
                         event_col=event_col,
                         group_col=treat_col,
                         covar_cols=covar_candidates,
+                        positive_val=extracted_pos_val,
                     )
                     p_val = stats_dict.get("km_stats", {}).get("p_value", "N/A")
                     p_val_str = (
                         f"{p_val:.4f}" if isinstance(p_val, float) else str(p_val)
                     )
+                    critique = CritiqueEngine.appraise_analysis(
+                        "survival",
+                        df,
+                        {
+                            "time_col": time_col,
+                            "event_col": event_col,
+                            "covar_cols": covar_candidates,
+                            "cox_stats": stats_dict.get("cox_stats", {}),
+                            "fitted_events": stats_dict.get("fitted_events"),
+                            "fitted_non_events": stats_dict.get("fitted_non_events"),
+                        },
+                    )
+                    state.last_analysis_type = "survival"
+                    state.last_analysis_results = stats_dict
+                    state.last_critique_md = critique.to_markdown()
 
                     dataset_exec_section = f"""
 ---
@@ -1317,19 +1786,41 @@ Dataset saved to session and ready for downstream analysis.
 - **Multivariable Cox Model:** Adjusted for confounders ({covar_str})
 
 *(Kaplan-Meier Survival Function is displayed in the Visual Output panel on the right)*
+
+---
+{critique.to_markdown()}
 """
                 elif event_col and treat_col:
                     coef_df, metrics, fig = StatHarness.run_logistic(
                         df,
                         outcome_col=event_col,
                         predictor_cols=covar_candidates or [treat_col],
+                        positive_val=extracted_pos_val,
                     )
+                    critique = CritiqueEngine.appraise_analysis(
+                        "logistic",
+                        df,
+                        {
+                            "outcome_col": event_col,
+                            "predictor_cols": covar_candidates or [treat_col],
+                            "coef_df": coef_df,
+                            "fitted_events": metrics.get("fitted_events"),
+                            "fitted_non_events": metrics.get("fitted_non_events"),
+                        },
+                    )
+                    state.last_analysis_type = "logistic"
+                    state.last_analysis_results = metrics
+                    state.last_critique_md = critique.to_markdown()
+
                     dataset_exec_section = f"""
 ---
 ### 🚀 Multivariable Logistic Regression Execution:
 - **Dataset:** `{state.file_name}` (n = {len(df):,} records)
 - **Primary Binary Outcome:** `{event_col}`
 - **Pseudo $R^2$ (McFadden):** `{metrics.get("mcfadden", 0.0):.4f}` | **AIC:** `{metrics.get("aic", 0.0):.1f}`
+
+---
+{critique.to_markdown()}
 """
             else:
                 sample_calc = StatHarness.run_sample_size(
@@ -1405,12 +1896,41 @@ Dataset saved to session and ready for downstream analysis.
                     event_col=event_col,
                     group_col=treat_col,
                     covar_cols=covariates,
+                    positive_val=extracted_pos_val,
                 )
-                p_val = stats_dict.get("km_stats", {}).get("p_value", "N/A")
+                km_stats = stats_dict.get("km_stats", {})
+                p_val = km_stats.get("p_value", "N/A")
                 p_val_str = f"{p_val:.4f}" if isinstance(p_val, float) else str(p_val)
                 c_idx = stats_dict.get("cox_stats", {}).get(
                     "Concordance Index (C-index)", "N/A"
                 )
+                km_events = km_stats.get("km_events")
+                km_censored = km_stats.get("km_censored")
+                if km_events is not None and km_censored is not None:
+                    events_display = f"`{km_events}` out of `{km_events + km_censored}`"
+                else:
+                    raw_ev = (
+                        df[event_col].sum()
+                        if event_col in df.columns
+                        and pd.api.types.is_numeric_dtype(df[event_col])
+                        else "N/A"
+                    )
+                    events_display = f"`{raw_ev}` out of `{len(df)}`"
+                critique = CritiqueEngine.appraise_analysis(
+                    "survival",
+                    df,
+                    {
+                        "time_col": time_col,
+                        "event_col": event_col,
+                        "covar_cols": covariates,
+                        "cox_stats": stats_dict.get("cox_stats", {}),
+                        "fitted_events": stats_dict.get("fitted_events"),
+                        "fitted_non_events": stats_dict.get("fitted_non_events"),
+                    },
+                )
+                state.last_analysis_type = "survival"
+                state.last_analysis_results = stats_dict
+                state.last_critique_md = critique.to_markdown()
 
                 response_md = f"""### ⏱️ Survival Analysis Execution
 
@@ -1419,13 +1939,16 @@ Dataset saved to session and ready for downstream analysis.
 
 #### 1. Kaplan-Meier & Log-Rank Test:
 - **Log-Rank P-value:** **`{p_val_str}`**
-- **Total Events:** `{df[event_col].sum()}` out of `{len(df)}` subjects
+- **Total Events:** {events_display} subjects
 
 #### 2. Multivariable Cox Proportional Hazards Model:
 - **Concordance Index (C-index):** `{c_idx}`
 - **Covariates Adjusted:** {covar_str}
 
 *(Kaplan-Meier Survival Function has been rendered in the Visual Output window)*
+
+---
+{critique.to_markdown()}
 """
                 return response_md, state, fig, df
 
@@ -1457,14 +1980,32 @@ Dataset saved to session and ready for downstream analysis.
                         df,
                         outcome_col=target_outcome,
                         predictor_cols=covariates or cols[:4],
+                        positive_val=extracted_pos_val,
                     )
                     table_md = coef_df.to_markdown(index=False)
+                    critique = CritiqueEngine.appraise_analysis(
+                        "logistic",
+                        df,
+                        {
+                            "outcome_col": target_outcome,
+                            "predictor_cols": covariates or cols[:4],
+                            "coef_df": coef_df,
+                            "fitted_events": metrics.get("fitted_events"),
+                            "fitted_non_events": metrics.get("fitted_non_events"),
+                        },
+                    )
+                    state.last_analysis_type = "logistic"
+                    state.last_analysis_results = metrics
+                    state.last_critique_md = critique.to_markdown()
                     response_md = f"""### 🎯 Multivariable Logistic Regression
 
 **Dependent Outcome (Y):** `{target_outcome}` (Binary)  
 **McFadden Pseudo-$R^2$:** `{metrics.get("mcfadden", 0.0):.4f}` | **AIC:** `{metrics.get("aic", 0.0):.1f}`
 
 {table_md}
+
+---
+{critique.to_markdown()}
 """
                     return response_md, state, fig, df
                 else:

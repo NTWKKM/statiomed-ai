@@ -1,8 +1,10 @@
-"""
-tests/test_clinical_analyst.py - Unit tests for Clinical Analyst Engine & Statistical Harness
-"""
+import numpy as np
+import pandas as pd
+import pytest
+from lifelines import KaplanMeierFitter
 
 from agent.clinical_analyst import ClinicalAnalystEngine, StatHarness
+from agent.critique_engine import CritiqueEngine
 from core.state import AppState
 from views.view_data import generate_example_dataset
 
@@ -217,3 +219,601 @@ def test_clinical_analyst_turn_sample_size():
     assert (
         "\\alpha" in response_md or "alpha" in response_md.lower() or "α" in response_md
     )
+
+
+def test_logistic_epv_with_predictor_missingness():
+    # 100 subjects: 25 events, 75 non-events in full df
+    # 20 out of 25 event cases have missing biomarker -> listwise deletion drops them
+    # Fitted cohort has only 5 events -> for 2 predictors, fitted EPV = 5/2 = 2.5 (Severe EPV Deficit < 5)
+    np.random.seed(42)
+    n = 100
+    y = np.array([1] * 25 + [0] * 75)
+    age = np.random.normal(55, 10, n)
+    biomarker = np.random.normal(10, 2, n)
+    # Introduce NaN in biomarker for 20 event cases
+    biomarker[:20] = np.nan
+
+    df = pd.DataFrame({"death": y, "age": age, "biomarker": biomarker})
+
+    coef_df, metrics, fig = StatHarness.run_logistic(
+        df=df, outcome_col="death", predictor_cols=["age", "biomarker"]
+    )
+    assert metrics["fitted_events"] == 5
+    assert metrics["fitted_non_events"] == 75
+    assert metrics["n_clean"] == 80
+
+    verdict = CritiqueEngine.appraise_analysis(
+        "logistic",
+        df=df,
+        results_meta={
+            "outcome_col": "death",
+            "predictor_cols": ["age", "biomarker"],
+            "coef_df": coef_df,
+            "fitted_events": metrics["fitted_events"],
+            "fitted_non_events": metrics["fitted_non_events"],
+        },
+    )
+
+    # EPV should be assessed against fitted cohort (5 events / 2 predictors = 2.5 -> HIGH risk)
+    epv_finding = next((f for f in verdict.findings if f.category == "EPV"), None)
+    assert epv_finding is not None
+    assert epv_finding.severity == "HIGH"
+    assert "Severe EPV Deficit" in epv_finding.title
+    assert "2.5" in epv_finding.title or "5 effective events" in epv_finding.description
+    assert verdict.overall_status == "HIGH_RISK_BIAS"
+
+    # Turn processing preserves critique in state
+    state = AppState(df=df, file_name="epv_test.csv")
+    resp_md, new_state, _, _ = ClinicalAnalystEngine.process_turn(
+        user_message="logistic regression death on age and biomarker",
+        file_paths=None,
+        state=state,
+    )
+    assert new_state.last_analysis_type == "logistic"
+    assert new_state.last_critique_md is not None
+    assert "Severe EPV Deficit" in new_state.last_critique_md
+
+
+def test_dataset_reload_clears_cached_analysis_state(tmp_path):
+    # Setup state with previous analysis results and matched cohort
+    df_old = pd.DataFrame({"old_x": [1, 2, 3], "old_y": [0, 1, 0]})
+    df_matched_old = pd.DataFrame({"old_x": [1, 2], "old_y": [0, 1]})
+    state = AppState(
+        df=df_old,
+        file_name="old_cohort.csv",
+        df_matched=df_matched_old,
+        is_matched=True,
+        last_analysis_type="survival",
+        last_analysis_results={"km_stats": {"p_value": 0.04}},
+        last_critique_md="### Previous Appraisal",
+    )
+
+    # Ingest a new CSV dataset
+    new_csv_path = tmp_path / "new_dataset.csv"
+    pd.DataFrame(
+        {"time": [10, 20, 30], "death": [1, 0, 1], "treatment": [1, 0, 1]}
+    ).to_csv(new_csv_path, index=False)
+
+    resp_md, new_state, _fig, _df = ClinicalAnalystEngine.process_turn(
+        user_message="",
+        file_paths=[str(new_csv_path)],
+        state=state,
+    )
+
+    assert new_state.file_name == "new_dataset.csv"
+    assert new_state.is_matched is False
+    assert new_state.df_matched is None
+    assert new_state.last_analysis_type is None
+    assert new_state.last_analysis_results == {}
+    assert new_state.last_critique_md is None
+
+
+def test_synthetic_cohort_and_proposal_inspector_sync():
+    # 1. Synthetic survival (Case C)
+    state1 = AppState()
+    msg_synth = (
+        "สร้าง synthetic cohort สำหรับการทดลองรักษา SGLT2 inhibitor vs Standard care"
+    )
+    resp1, new_state1, _fig1, _ = ClinicalAnalystEngine.process_turn(
+        user_message=msg_synth,
+        file_paths=None,
+        state=state1,
+    )
+    assert new_state1.last_analysis_type == "survival"
+    assert new_state1.last_analysis_results is not None
+    assert "km_stats" in new_state1.last_analysis_results
+    assert new_state1.last_critique_md is not None
+    assert "Automated Clinical Critique & Appraisal" in new_state1.last_critique_md
+    assert "Automated Clinical Critique & Appraisal" in resp1
+
+    # 2. Proposal-triggered survival on active dataset (Case E)
+    df_surv = pd.DataFrame(
+        {
+            "time": [10, 20, 30, 40, 50] * 20,
+            "death": [1, 0, 1, 0, 1] * 20,
+            "treatment": [1, 1, 0, 0, 1] * 20,
+            "age": np.random.normal(60, 10, 100),
+        }
+    )
+    state2 = AppState(df=df_surv, file_name="active_trial.csv")
+    proposal_text = "PICO Framework\nPopulation: Heart failure patients\nIntervention: SGLT2i\nComparator: Placebo\nPrimary Outcome: All-cause mortality time to event"
+    resp2, new_state2, _fig2, _ = ClinicalAnalystEngine.process_turn(
+        user_message=proposal_text,
+        file_paths=None,
+        state=state2,
+    )
+    assert new_state2.last_analysis_type == "survival"
+    assert new_state2.last_critique_md is not None
+    assert "Automated Clinical Critique & Appraisal" in resp2
+
+    # 3. Proposal-triggered logistic regression on active dataset (Case E)
+    df_logit = pd.DataFrame(
+        {
+            "event": [1, 0, 1, 0, 1] * 20,
+            "treatment": [1, 1, 0, 0, 1] * 20,
+            "age": np.random.normal(60, 10, 100),
+        }
+    )
+    state3 = AppState(df=df_logit, file_name="binary_trial.csv")
+    resp3, new_state3, _fig3, _ = ClinicalAnalystEngine.process_turn(
+        user_message=proposal_text,
+        file_paths=None,
+        state=state3,
+    )
+    assert new_state3.last_analysis_type == "logistic"
+    assert new_state3.last_critique_md is not None
+    assert "Automated Clinical Critique & Appraisal" in resp3
+
+
+def test_coerce_to_binary_series_extended():
+    from agent.clinical_analyst import _coerce_to_binary_series
+
+    # Numeric 1/2 coding without explicit positive_val must raise ValueError (prohibits inference from numeric ordering)
+    s1 = pd.Series([1, 2, 1, 2, 2])
+    with pytest.raises(
+        ValueError, match="Binary outcome column contains non-standard numeric values"
+    ):
+        _coerce_to_binary_series(s1)
+
+    # With explicit positive_val=2 (e.g. 2=Event, 1=Censored)
+    res1_p2 = _coerce_to_binary_series(s1, positive_val=2)
+    assert list(res1_p2) == [0, 1, 0, 1, 1]
+
+    # With explicit positive_val=1 (e.g. 1=Event, 2=Censored)
+    res1_p1 = _coerce_to_binary_series(s1, positive_val=1)
+    assert list(res1_p1) == [1, 0, 1, 0, 0]
+
+    # Negative/Positive numeric without positive_val must raise ValueError
+    s2 = pd.Series([-1, 1, -1, 1])
+    with pytest.raises(
+        ValueError, match="Binary outcome column contains non-standard numeric values"
+    ):
+        _coerce_to_binary_series(s2)
+
+    # Negative/Positive numeric with explicit positive_val=1
+    res2 = _coerce_to_binary_series(s2, positive_val=1)
+    assert list(res2) == [0, 1, 0, 1]
+
+    # Standard 0/1 (explicit 0/1 outcomes preserved automatically)
+    s3 = pd.Series([0, 1, 0, 1])
+    res3 = _coerce_to_binary_series(s3)
+    assert list(res3) == [0, 1, 0, 1]
+
+    # Clinical string tokens: Dead / Alive
+    s_dead = pd.Series(["Dead", "Alive", "Dead", "Alive"])
+    res_dead = _coerce_to_binary_series(s_dead)
+    assert list(res_dead) == [1, 0, 1, 0]
+
+    # Clinical string tokens: Death / Survived
+    s_death = pd.Series(["Death", "Survived", "Death"])
+    res_death = _coerce_to_binary_series(s_death)
+    assert list(res_death) == [1, 0, 1]
+
+    # Clinical string tokens: Case / Control
+    s_case = pd.Series(["Control", "Case", "Control"])
+    res_case = _coerce_to_binary_series(s_case)
+    assert list(res_case) == [0, 1, 0]
+
+    # Ambiguous strings without positive_val must raise ValueError
+    s_ambig = pd.Series(["Cohort_A", "Cohort_B", "Cohort_A"])
+    with pytest.raises(
+        ValueError,
+        match="Binary outcome column contains unrecognized category values",
+    ):
+        _coerce_to_binary_series(s_ambig)
+
+    # Ambiguous strings with explicit positive_val
+    res_ambig = _coerce_to_binary_series(s_ambig, positive_val="Cohort_B")
+    assert list(res_ambig) == [0, 1, 0]
+
+    # Negative tokens precedence (e.g., "non-event" vs "event", "-free" / "_free" vs positive words)
+    s_event = pd.Series(["non-event", "event", "non-event", "event"])
+    res_event = _coerce_to_binary_series(s_event)
+    assert list(res_event) == [0, 1, 0, 1]
+
+    s_relapse = pd.Series(["relapse-free", "relapse", "relapse-free", "relapse"])
+    res_relapse = _coerce_to_binary_series(s_relapse)
+    assert list(res_relapse) == [0, 1, 0, 1]
+
+    s_recurrence = pd.Series(
+        ["recurrence_free", "recurrence", "recurrence_free", "recurrence"]
+    )
+    res_recurrence = _coerce_to_binary_series(s_recurrence)
+    assert list(res_recurrence) == [0, 1, 0, 1]
+
+    s_progression = pd.Series(["progression-free", "relapse"])
+    res_progression = _coerce_to_binary_series(s_progression)
+    assert list(res_progression) == [0, 1]
+
+    # Single-value recognized tokens
+    s_single_pos = pd.Series(["Dead", "Dead"])
+    assert list(_coerce_to_binary_series(s_single_pos)) == [1, 1]
+    s_single_neg = pd.Series(["non-event", "non-event"])
+    assert list(_coerce_to_binary_series(s_single_neg)) == [0, 0]
+
+    # Unrecognized single or multi-value categories without positive_val must raise ValueError
+    s_single_unrecognized = pd.Series(["Unknown", "Unknown"])
+    with pytest.raises(
+        ValueError,
+        match="Binary outcome column contains unrecognized category values",
+    ):
+        _coerce_to_binary_series(s_single_unrecognized)
+
+    s_multi_unrecognized = pd.Series(["Alive", "Dead", "Pending"])
+    with pytest.raises(
+        ValueError,
+        match="Binary outcome column contains unrecognized category values",
+    ):
+        _coerce_to_binary_series(s_multi_unrecognized)
+
+
+def test_extract_positive_val_from_message_quoted_and_spaces():
+    from agent.clinical_analyst import _extract_positive_val_from_message
+
+    assert (
+        _extract_positive_val_from_message(
+            'Run survival with positive_val="Disease Present"'
+        )
+        == "Disease Present"
+    )
+    assert (
+        _extract_positive_val_from_message(
+            "Run survival with positive_val='Heart Failure'"
+        )
+        == "Heart Failure"
+    )
+    assert (
+        _extract_positive_val_from_message("event: 'Acute Kidney Injury'")
+        == "Acute Kidney Injury"
+    )
+    assert _extract_positive_val_from_message("pos_val: 1") == 1
+    assert _extract_positive_val_from_message("event_val=Dead") == "Dead"
+    assert _extract_positive_val_from_message("positive_val=1.5") == 1.5
+    assert _extract_positive_val_from_message("positive_val='1'") == 1
+
+
+def test_run_survival_with_non_standard_binary_event():
+    np.random.seed(42)
+    n = 60
+    # event_col encoded as 1 (censored/alive) and 2 (dead)
+    df = pd.DataFrame(
+        {
+            "time": np.random.uniform(10, 100, n),
+            "status": [1, 2] * (n // 2),
+            "treatment": [0, 1] * (n // 2),
+            "age": np.random.normal(55, 8, n),
+        }
+    )
+
+    # Without positive_val, non-0/1 numeric raises ValueError for clinical safety
+    with pytest.raises(
+        ValueError, match="Binary outcome column contains non-standard numeric values"
+    ):
+        StatHarness.run_survival(
+            df=df,
+            time_col="time",
+            event_col="status",
+            group_col="treatment",
+            covar_cols=["age"],
+        )
+
+    # With explicit positive_val=2 (dead=2 is event, alive=1 is censored)
+    fig, summary, meta = StatHarness.run_survival(
+        df=df,
+        time_col="time",
+        event_col="status",
+        group_col="treatment",
+        covar_cols=["age"],
+        positive_val=2,
+    )
+
+    assert meta["fitted_events"] == 30
+    assert meta["fitted_non_events"] == 30
+    assert meta["fitted_non_events"] >= 0
+    assert meta["km_stats"]["km_events"] == 30
+    assert meta["km_stats"]["km_censored"] == 30
+
+    # Regression assertion: lifelines Kaplan-Meier event count matches fitted_events
+    # (verifying that lifelines received normalized 0/1 binary event series, avoiding treating 1 and 2 as all observed events)
+    kmf = KaplanMeierFitter()
+    norm_status = (df["status"] == 2).astype(int)
+    kmf.fit(df["time"], norm_status)
+    assert int(kmf.event_observed.sum()) == 30
+    assert int(kmf.event_observed.sum()) == meta["fitted_events"]
+    assert int((kmf.event_observed == 0).sum()) == meta["fitted_non_events"]
+
+
+def test_run_logistic_with_string_outcome():
+    np.random.seed(42)
+    n = 80
+    df = pd.DataFrame(
+        {
+            "mortality": ["Alive", "Dead"] * (n // 2),
+            "age": np.random.normal(60, 10, n),
+            "biomarker": np.random.normal(5, 2, n),
+        }
+    )
+
+    coef_df, metrics, fig = StatHarness.run_logistic(
+        df=df,
+        outcome_col="mortality",
+        predictor_cols=["age", "biomarker"],
+    )
+
+    assert metrics["fitted_events"] == 40
+    assert metrics["fitted_non_events"] == 40
+    assert metrics["n_clean"] == 80
+
+
+def test_app_state_file_size_updated_on_ingest(tmp_path):
+    # Create temp CSV file
+    csv_file = tmp_path / "test_upload.csv"
+    csv_file.write_text("id,age,death\n1,50,0\n2,60,1\n3,70,0\n")
+    expected_size = csv_file.stat().st_size
+
+    state = AppState()
+    _resp, new_state, _fig, _df = ClinicalAnalystEngine.process_turn(
+        user_message="Analyze uploaded dataset",
+        file_paths=[str(csv_file)],
+        state=state,
+    )
+
+    assert new_state.file_name == "test_upload.csv"
+    assert new_state.file_size_bytes == expected_size
+    assert new_state.file_size_bytes > 0
+
+
+def test_coerce_to_binary_series_preserves_nulls():
+    from agent.clinical_analyst import _coerce_to_binary_series
+
+    # Standard numeric 0/1 with nulls
+    s_num = pd.Series([0, 1, np.nan, 1, None])
+    res_num = _coerce_to_binary_series(s_num)
+    assert res_num.dtype.name == "Int64"
+    assert res_num.isna().tolist() == [False, False, True, False, True]
+    assert res_num.dropna().tolist() == [0, 1, 1]
+
+    # Numeric 1/2 with explicit positive_val=2 and nulls
+    s_12 = pd.Series([1, 2, np.nan, 2, None])
+    res_p2 = _coerce_to_binary_series(s_12, positive_val=2)
+    assert res_p2.dtype.name == "Int64"
+    assert res_p2.isna().tolist() == [False, False, True, False, True]
+    assert res_p2.dropna().tolist() == [0, 1, 1]
+
+    # Numeric 1/2 with explicit positive_val=1 and nulls
+    res_p1 = _coerce_to_binary_series(s_12, positive_val=1)
+    assert res_p1.dtype.name == "Int64"
+    assert res_p1.isna().tolist() == [False, False, True, False, True]
+    assert res_p1.dropna().tolist() == [1, 0, 0]
+
+    # Boolean with nulls
+    s_bool = pd.Series([True, False, None, True], dtype="object")
+    res_bool = _coerce_to_binary_series(s_bool)
+    assert res_bool.isna().tolist() == [False, False, True, False]
+    assert res_bool.dropna().tolist() == [1, 0, 1]
+
+    # Clinical strings with nulls
+    s_str = pd.Series(["Alive", "Dead", np.nan, "Dead", None])
+    res_str = _coerce_to_binary_series(s_str)
+    assert res_str.isna().tolist() == [False, False, True, False, True]
+    assert res_str.dropna().tolist() == [0, 1, 1]
+
+    # Ambiguous strings with positive_val and nulls
+    s_ambig = pd.Series(["Cohort_A", "Cohort_B", np.nan, "Cohort_B", None])
+    res_ambig = _coerce_to_binary_series(s_ambig, positive_val="Cohort_B")
+    assert res_ambig.isna().tolist() == [False, False, True, False, True]
+    assert res_ambig.dropna().tolist() == [0, 1, 1]
+
+
+def test_run_survival_with_missing_events_and_positive_val_configurations():
+    np.random.seed(42)
+    n = 100
+    # status: 1 = alive/censored, 2 = dead/event, with 10 missing values (5 ones and 5 twos as np.nan)
+    statuses = [1, 2] * (n // 2)
+    for idx in [4, 5, 14, 15, 24, 25, 34, 35, 44, 45]:
+        statuses[idx] = np.nan
+
+    df = pd.DataFrame(
+        {
+            "time": np.random.uniform(10, 100, n),
+            "status": statuses,
+            "treatment": [0, 1] * (n // 2),
+            "age": np.random.normal(60, 8, n),
+        }
+    )
+
+    # Configuration 1: positive_val=2 (dead=2 is event, alive=1 is censored)
+    fig1, summary1, meta1 = StatHarness.run_survival(
+        df=df,
+        time_col="time",
+        event_col="status",
+        group_col="treatment",
+        covar_cols=["age"],
+        positive_val=2,
+    )
+    # Total non-missing rows = 90 (45 ones and 45 twos)
+    assert meta1["km_stats"]["km_events"] == 45
+    assert meta1["km_stats"]["km_censored"] == 45
+    assert meta1["fitted_events"] == 45
+    assert meta1["fitted_non_events"] == 45
+
+    # Configuration 2: positive_val=1 (alive/remission=1 is event, dead=2 is censored)
+    fig2, summary2, meta2 = StatHarness.run_survival(
+        df=df,
+        time_col="time",
+        event_col="status",
+        group_col="treatment",
+        covar_cols=["age"],
+        positive_val=1,
+    )
+    assert meta2["km_stats"]["km_events"] == 45
+    assert meta2["km_stats"]["km_censored"] == 45
+    assert meta2["fitted_events"] == 45
+    assert meta2["fitted_non_events"] == 45
+
+
+def test_run_logistic_with_non_standard_binary_and_positive_val():
+    np.random.seed(42)
+    n = 60
+    # 1 = control/cured, 2 = relapse/event
+    df = pd.DataFrame(
+        {
+            "outcome": [1, 2] * (n // 2),
+            "age": np.random.normal(55, 10, n),
+            "biomarker": np.random.normal(3, 1, n),
+        }
+    )
+
+    # Without positive_val, must raise ValueError for clinical safety
+    with pytest.raises(
+        ValueError, match="Binary outcome column contains non-standard numeric values"
+    ):
+        StatHarness.run_logistic(
+            df=df,
+            outcome_col="outcome",
+            predictor_cols=["age", "biomarker"],
+        )
+
+    # With positive_val=2 (outcome 2 is event)
+    coef_df2, metrics2, _ = StatHarness.run_logistic(
+        df=df,
+        outcome_col="outcome",
+        predictor_cols=["age", "biomarker"],
+        positive_val=2,
+    )
+    assert metrics2["fitted_events"] == 30
+    assert metrics2["fitted_non_events"] == 30
+    assert not coef_df2.empty
+
+    # With positive_val=1 (outcome 1 is event)
+    coef_df1, metrics1, _ = StatHarness.run_logistic(
+        df=df,
+        outcome_col="outcome",
+        predictor_cols=["age", "biomarker"],
+        positive_val=1,
+    )
+    assert metrics1["fitted_events"] == 30
+    assert metrics1["fitted_non_events"] == 30
+    assert not coef_df1.empty
+
+
+def test_run_binary_rct_with_non_standard_binary_and_positive_val():
+    n = 60
+    # treatment: 1=Control, 2=Intervention; outcome: 1=No event, 2=Event
+    df = pd.DataFrame(
+        {
+            "arm": [1, 2] * (n // 2),
+            "relapse": [1, 2] * (n // 2),
+        }
+    )
+
+    # Without positive_val, must raise ValueError
+    with pytest.raises(
+        ValueError, match="Binary outcome column contains non-standard numeric values"
+    ):
+        StatHarness.run_binary_rct(
+            df=df,
+            treatment_col="arm",
+            outcome_col="relapse",
+        )
+
+    # With explicit positive_val configurations
+    summary_df, metrics, fig = StatHarness.run_binary_rct(
+        df=df,
+        treatment_col="arm",
+        outcome_col="relapse",
+        treatment_positive_val=2,
+        outcome_positive_val=2,
+    )
+    assert not summary_df.empty
+    assert metrics["n_control"] == 30
+    assert metrics["n_intervention"] == 30
+    assert fig is not None
+
+
+def test_run_diagnostic_with_non_standard_binary_and_positive_val():
+    # DataFrame with 1/2 coded index test and gold standard
+    data = (
+        [{"test": 2, "gold": 2}] * 40
+        + [{"test": 2, "gold": 1}] * 10
+        + [{"test": 1, "gold": 2}] * 5
+        + [{"test": 1, "gold": 1}] * 45
+    )
+    df = pd.DataFrame(data)
+
+    # Without positive_val, calculation from dataframe fails and strict validation raises ValueError
+    with pytest.raises(
+        ValueError, match="No valid data provided for diagnostic accuracy calculation"
+    ):
+        StatHarness.run_diagnostic(
+            df=df, index_test_col="test", ref_standard_col="gold"
+        )
+
+    # With positive_val=2 (2 is positive test / disease present)
+    metrics_df, metrics, fig = StatHarness.run_diagnostic(
+        df=df,
+        index_test_col="test",
+        ref_standard_col="gold",
+        positive_val=2,
+    )
+    assert metrics["tp"] == 40
+    assert metrics["fp"] == 10
+    assert metrics["fn"] == 5
+    assert metrics["tn"] == 45
+    assert round(metrics["sensitivity"], 4) == round(40 / 45, 4)
+    assert round(metrics["specificity"], 4) == round(45 / 55, 4)
+
+
+def test_process_turn_routing_with_explicit_positive_val():
+    np.random.seed(42)
+    n = 60
+    df = pd.DataFrame(
+        {
+            "death": [1, 2] * (n // 2),
+            "time": np.random.uniform(5, 50, n),
+            "age": np.random.normal(60, 5, n),
+            "treatment": [0, 1] * (n // 2),
+        }
+    )
+
+    state = AppState()
+    state.df = df
+    state.file_name = "cohort_12.csv"
+
+    # Route logistic regression with positive_val=2
+    resp_log, new_state_log, _fig_log, _ = ClinicalAnalystEngine.process_turn(
+        user_message="run logistic regression on death with positive_val=2",
+        file_paths=None,
+        state=state,
+    )
+    assert new_state_log.last_analysis_type == "logistic"
+    assert "Multivariable Logistic Regression" in resp_log
+
+    # Route survival analysis with positive_val=2
+    resp_surv, new_state_surv, _fig_surv, _ = ClinicalAnalystEngine.process_turn(
+        user_message="run survival analysis on time and death with positive_val=2",
+        file_paths=None,
+        state=state,
+    )
+    assert new_state_surv.last_analysis_type == "survival"
+    assert "Survival Analysis" in resp_surv

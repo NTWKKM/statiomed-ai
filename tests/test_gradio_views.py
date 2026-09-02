@@ -204,6 +204,7 @@ def test_meta_analysis_view():
 def test_app_theme_compatibility():
     """Verify that app theme compares cleanly against all Gradio built-in themes."""
     from gradio import utils
+
     from app import theme
 
     theme_dict = theme.to_dict()
@@ -212,3 +213,64 @@ def test_app_theme_compatibility():
         # Ensure comparison does not raise AttributeError on font string comparisons
         match = theme_dict == built_in_theme.to_dict()
         assert isinstance(match, bool)
+
+
+def test_ai_copilot_chat_submit_action_dynamic_critique():
+    """Verify dynamic critique rendering in chat submit action."""
+    from views.view_ai_copilot import chat_submit_action
+
+    state = AppState()
+
+    # 1. Non-analysis prompt
+    (
+        history,
+        _,
+        _,
+        new_state,
+        _,
+        _,
+        _,
+        critique_summary_non_analysis,
+    ) = chat_submit_action(
+        user_message="Hello, what can you do?",
+        uploaded_files=None,
+        chat_history=[],
+        state=state,
+    )
+    assert (
+        "No statistical analysis executed in this turn" in critique_summary_non_analysis
+    )
+
+    # 2. Analysis prompt (e.g. synthetic survival)
+    (
+        history2,
+        _,
+        _,
+        new_state2,
+        _,
+        _,
+        _,
+        critique_summary_analysis,
+    ) = chat_submit_action(
+        user_message="สร้าง synthetic cohort สำหรับการทดลองรักษา SGLT2 inhibitor vs Standard care",
+        uploaded_files=None,
+        chat_history=[],
+        state=state,
+    )
+    # When option 2 / analysis is selected in next step or survival executed:
+    assert new_state2.has_data()
+
+
+def test_ai_copilot_controls_non_interactive():
+    """Verify that unwired workspace, model, storage, and microphone controls are non-interactive."""
+    import gradio as gr
+
+    from views.view_ai_copilot import create_ai_copilot_view
+
+    with gr.Blocks():
+        tab, components = create_ai_copilot_view(app_state=gr.State())
+
+    assert components["workspace_selector"].interactive is False
+    assert components["model_dropdown"].interactive is False
+    assert components["storage_dropdown"].interactive is False
+    assert components["btn_mic"].interactive is False
