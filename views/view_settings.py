@@ -1,32 +1,51 @@
-"""
-views/view_settings.py - StatioMed AI Settings & Environment View (Gradio Native)
-=================================================================================
-System configurations, Hugging Face ZeroGPU status, NCBI API keys, and
-Zero-PHI privacy compliance monitor.
-=================================================================================
-"""
-
-from __future__ import annotations
-
+import html
 import os
 
 import gradio as gr
 
+from agent.agent_runner import ClinicalAgentRunner
 from core.state import AppState
 
 
 def update_settings_action(ncbi_key: str, hf_token: str, state: AppState) -> str:
-    """Action callback: Updates runtime API keys and environment variables."""
-    if ncbi_key:
-        os.environ["NCBI_API_KEY"] = ncbi_key.strip()
-    if hf_token:
-        os.environ["HF_TOKEN"] = hf_token.strip()
+    """Action callback: Updates runtime API keys and credentials in session AppState."""
+    if ncbi_key is not None:
+        state.ncbi_api_key = ncbi_key.strip() or None
+
+    if hf_token is not None:
+        state.hf_token = hf_token.strip() or None
 
     return """
     <div style='background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:12px;border-radius:8px;'>
-        ✅ Settings updated successfully. API credentials will be used for downstream PubMed and Hugging Face inference calls.
+        ✅ Settings updated successfully. API credentials saved and ready for downstream PubMed and Hugging Face inference calls.
     </div>
     """
+
+
+def test_hf_connection_action(hf_token: str, state: AppState) -> str:
+    """Action callback: Tests live connectivity to Hugging Face Inference API."""
+    token_to_test = (
+        hf_token.strip() if hf_token else (state.hf_token or os.getenv("HF_TOKEN"))
+    )
+    success, msg, details = ClinicalAgentRunner.test_hf_connection(token=token_to_test)
+    if success:
+        return f"""
+        <div style='background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:14px;border-radius:8px;'>
+            <strong>{html.escape(msg)}</strong>
+            <div style='margin-top:6px;font-size:0.85rem;color:#15803d;'>
+                Model: <code>{html.escape(details.get("model", ""))}</code> | Latency: <code>{details.get("elapsed_ms", 0)}ms</code>
+            </div>
+        </div>
+        """
+    else:
+        return f"""
+        <div style='background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:14px;border-radius:8px;'>
+            <strong>{html.escape(msg)}</strong>
+            <div style='margin-top:6px;font-size:0.85rem;color:#b91c1c;'>
+                Please verify that your Hugging Face Token has <code>Read</code> permissions at <a href='https://huggingface.co/settings/tokens' target='_blank' style='text-decoration:underline;'>huggingface.co/settings/tokens</a>.
+            </div>
+        </div>
+        """
 
 
 def create_settings_view(app_state: gr.State) -> tuple[gr.Tab, dict[str, gr.Component]]:
@@ -66,7 +85,11 @@ def create_settings_view(app_state: gr.State) -> tuple[gr.Tab, dict[str, gr.Comp
                     value=os.getenv("HF_TOKEN", ""),
                     type="password",
                 )
-                btn_save = gr.Button("💾 Save Configuration", variant="primary")
+                with gr.Row():
+                    btn_save = gr.Button("💾 Save Configuration", variant="primary")
+                    btn_test_hf = gr.Button(
+                        "🧪 Test Hugging Face Connection", variant="secondary"
+                    )
                 status_html = gr.HTML("")
 
             with gr.Column(scale=6):
@@ -94,8 +117,15 @@ def create_settings_view(app_state: gr.State) -> tuple[gr.Tab, dict[str, gr.Comp
             outputs=[status_html],
         )
 
+        btn_test_hf.click(
+            fn=test_hf_connection_action,
+            inputs=[hf_input, app_state],
+            outputs=[status_html],
+        )
+
     return tab, {
         "ncbi_input": ncbi_input,
         "hf_input": hf_input,
         "btn_save": btn_save,
+        "btn_test_hf": btn_test_hf,
     }

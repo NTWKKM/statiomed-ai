@@ -1124,6 +1124,7 @@ class ClinicalAnalystEngine:
         user_message: str,
         file_paths: list[str] | None,
         state: AppState,
+        model_name: str | None = None,
     ) -> tuple[str, AppState, go.Figure | None, pd.DataFrame | None]:
         """
         Processes a multi-turn user message + attached files, executes statistical
@@ -1133,6 +1134,14 @@ class ClinicalAnalystEngine:
         lower_msg = user_msg.lower()
         file_paths = file_paths or []
         extracted_pos_val = _extract_positive_val_from_message(user_msg)
+
+        active_model = model_name or getattr(state, "active_model", None)
+        active_token = getattr(state, "hf_token", None)
+        is_offline_mode = bool(
+            active_model
+            and "local" in active_model.lower()
+            and "offline" in active_model.lower()
+        )
 
         proposal_meta: ProposalMetadata | None = None
         loaded_new_data = False
@@ -1542,10 +1551,12 @@ Dataset saved to session and ready for downstream analysis.
                 ClinicalTopicIdeator.generate_research_directions(user_msg)
             )
 
-            # If LLM is available, synthesize tailored clinical proposals
-            if ClinicalAgentRunner.is_llm_available():
+            # If LLM is available and not in explicit offline mode, synthesize tailored clinical proposals
+            if not is_offline_mode and ClinicalAgentRunner.is_llm_available(
+                active_token
+            ):
                 llm_synth = ClinicalAgentRunner.synthesize_proposals_with_llm(
-                    user_msg, articles
+                    user_msg, articles, model_id=active_model, token=active_token
                 )
                 if llm_synth:
                     return llm_synth, state, None, None
@@ -2045,8 +2056,10 @@ Dataset saved to session and ready for downstream analysis.
 
         # Default conversational / General biostatistical query
         pubmed_query = user_msg if len(user_msg) > 5 else "clinical trial evidence"
-        if ClinicalAgentRunner.is_llm_available():
-            extracted_q = ClinicalAgentRunner.extract_biomedical_search_terms(user_msg)
+        if not is_offline_mode and ClinicalAgentRunner.is_llm_available(active_token):
+            extracted_q = ClinicalAgentRunner.extract_biomedical_search_terms(
+                user_msg, model_id=active_model, token=active_token
+            )
             if extracted_q:
                 pubmed_query = extracted_q
 
@@ -2059,8 +2072,8 @@ Dataset saved to session and ready for downstream analysis.
         except Exception as e:
             logger.warning(f"PubMed search error in clinical consultation: {e}")
 
-        # Live LLM Agent Consultation if token is present
-        if ClinicalAgentRunner.is_llm_available():
+        # Live LLM Agent Consultation if token is present and not offline mode
+        if not is_offline_mode and ClinicalAgentRunner.is_llm_available(active_token):
             session_ctx = (
                 f"Active Dataset: {state.file_name} (n={len(state.df)} records, variables={state.df.columns.tolist()[:8]})"
                 if state.has_data() and state.df is not None
@@ -2070,6 +2083,8 @@ Dataset saved to session and ready for downstream analysis.
                 user_query=user_msg,
                 articles=articles,
                 session_context=session_ctx,
+                model_id=active_model,
+                token=active_token,
             )
             if llm_consult:
                 return llm_consult, state, None, state.df

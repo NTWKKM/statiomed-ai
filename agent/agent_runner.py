@@ -10,6 +10,7 @@ Orchestrates smolagents ToolCallingAgent with 2-Tier Model Strategy:
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, List, Optional
 
 import pandas as pd
@@ -37,29 +38,95 @@ except ImportError:
 
 try:
     from huggingface_hub import InferenceClient
+    from huggingface_hub import get_token as hf_get_token
 
     HAS_HF_HUB = True
 except ImportError:
     HAS_HF_HUB = False
     InferenceClient = None  # type: ignore
 
+    def hf_get_token() -> Optional[str]:  # type: ignore
+        return None
+
+
 try:
-    from smolagents import HfApiModel, ToolCallingAgent
+    from smolagents import (
+        InferenceClientModel,
+    )
+    from smolagents import (
+        ToolCallingAgent as SmolToolCallingAgent,
+    )
 
     HAS_SMOLAGENTS = True
+    HfApiModel = InferenceClientModel
 except ImportError:
-    HAS_SMOLAGENTS = False
+    try:
+        from smolagents import (
+            HfApiModel as InferenceClientModel,
+        )  # type: ignore
+        from smolagents import (
+            ToolCallingAgent as SmolToolCallingAgent,
+        )
 
-    class HfApiModel:
-        def __init__(
-            self,
-            model_id: str,
-            provider: Optional[str] = None,
-            token: Optional[str] = None,
-        ):
-            self.model_id = model_id
-            self.provider = provider
-            self.token = token
+        HAS_SMOLAGENTS = True
+        HfApiModel = InferenceClientModel
+    except ImportError:
+        HAS_SMOLAGENTS = False
+        SmolToolCallingAgent = None  # type: ignore
+
+        class InferenceClientModel:  # type: ignore
+            def __init__(
+                self,
+                model_id: str,
+                provider: Optional[str] = None,
+                token: Optional[str] = None,
+                **kwargs,
+            ):
+                self.model_id = model_id
+                self.provider = provider
+                self.token = token
+
+        HfApiModel = InferenceClientModel  # type: ignore
+
+
+SUPPORTED_HF_MODELS: dict[str, str] = {
+    "qwen-72b": "Qwen/Qwen2.5-72B-Instruct",
+    "llama-70b": "meta-llama/Llama-3.3-70B-Instruct",
+    "deepseek-r1": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+    "mistral-24b": "mistralai/Mistral-Small-24B-Instruct-2501",
+}
+
+
+DEFAULT_HF_MODEL_ID = "Qwen/Qwen2.5-72B-Instruct"
+
+
+def resolve_hf_model_id(model_name_or_alias: Optional[str] = None) -> str:
+    """
+    Resolves UI labels, aliases, or environment variables to canonical Hugging Face Model IDs.
+    """
+    raw = (
+        model_name_or_alias
+        if model_name_or_alias and model_name_or_alias.strip()
+        else os.getenv("HF_MODEL_ID")
+    )
+    if not raw or not raw.strip():
+        return DEFAULT_HF_MODEL_ID
+
+    trimmed = raw.strip()
+    if "/" in trimmed:
+        return trimmed
+
+    clean = trimmed.lower()
+    if "qwen" in clean:
+        return "Qwen/Qwen2.5-72B-Instruct"
+    elif "llama" in clean:
+        return "meta-llama/Llama-3.3-70B-Instruct"
+    elif "deepseek" in clean or "r1" in clean:
+        return "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
+    elif "mistral" in clean:
+        return "mistralai/Mistral-Small-24B-Instruct-2501"
+
+    return DEFAULT_HF_MODEL_ID
 
 
 def _is_identifier_column(col_name: str) -> bool:
@@ -668,26 +735,137 @@ Operating Guidelines:
 class ClinicalAgentRunner:
     """
     High-Reasoning LLM Agent Bridge powered by Hugging Face Inference API.
-    Supports Qwen 2.5 72B / Llama 3.3 70B with Zero-Cost offline fallback.
+    Supports Qwen 2.5 72B / Llama 3.3 70B / DeepSeek R1 32B / Mistral Small 24B
+    with Zero-Cost offline fallback.
     """
 
     @classmethod
-    def get_token(cls) -> Optional[str]:
-        """Retrieves Hugging Face access token from environment."""
-        token = os.getenv("HF_TOKEN")
+    def get_token(cls, explicit_token: Optional[str] = None) -> Optional[str]:
+        """
+        Retrieves Hugging Face access token with hierarchical discovery:
+        1. Explicit argument passed to call
+        2. Environment variables (HF_TOKEN, HUGGINGFACE_HUB_TOKEN)
+        3. huggingface_hub.get_token() (~/.cache/huggingface/token or CLI login)
+        4. .env file in workspace root
+        """
+        if explicit_token and explicit_token.strip():
+            return explicit_token.strip()
+
+        token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
         if token and token.strip():
             return token.strip()
+
+        if HAS_HF_HUB and callable(hf_get_token):
+            try:
+                cached_token = hf_get_token()
+                if cached_token and str(cached_token).strip():
+                    return str(cached_token).strip()
+            except Exception as e:
+                logger.debug("Error checking huggingface_hub.get_token: %s", e)
+
+        # Check local .env file in project root
+        env_file = Path(".env")
+        if env_file.exists():
+            try:
+                for line in env_file.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line.startswith("HF_TOKEN=") or line.startswith(
+                        "HUGGINGFACE_HUB_TOKEN="
+                    ):
+                        val = line.split("=", 1)[1].strip().strip("\"'")
+                        if val:
+                            return val
+            except Exception:
+                pass
+
         return None
 
     @classmethod
-    def is_llm_available(cls) -> bool:
+    def is_llm_available(cls, explicit_token: Optional[str] = None) -> bool:
         """Returns True if Hugging Face API token is configured."""
-        return cls.get_token() is not None and HAS_HF_HUB
+        return cls.get_token(explicit_token) is not None and HAS_HF_HUB
 
     @classmethod
-    def get_model_id(cls) -> str:
+    def get_model_id(cls, model_alias: Optional[str] = None) -> str:
         """Returns active LLM model identifier."""
-        return os.getenv("HF_MODEL_ID", "Qwen/Qwen2.5-72B-Instruct")
+        return resolve_hf_model_id(model_alias)
+
+    @classmethod
+    def test_hf_connection(
+        cls,
+        token: Optional[str] = None,
+        model_id: Optional[str] = None,
+        provider: Optional[str] = None,
+    ) -> tuple[bool, str, dict[str, Any]]:
+        """
+        Actively tests live connection to Hugging Face Inference API.
+        Returns (success: bool, message: str, details: dict).
+        """
+        resolved_token = cls.get_token(token)
+        if not resolved_token:
+            return (
+                False,
+                "No Hugging Face access token found. Please set HF_TOKEN in Settings or .env file.",
+                {"token_found": False},
+            )
+
+        if not HAS_HF_HUB or InferenceClient is None:
+            return (
+                False,
+                "huggingface_hub package is not available in environment.",
+                {"has_hf_hub": False},
+            )
+
+        target_model = resolve_hf_model_id(model_id)
+        provider = provider or os.getenv("HF_INFERENCE_PROVIDER", None)
+
+        import time
+
+        t0 = time.perf_counter()
+        try:
+            client = InferenceClient(
+                token=resolved_token,
+                provider=provider if provider != "auto" else None,
+                timeout=20.0,
+            )
+            test_messages = [
+                {
+                    "role": "system",
+                    "content": "You are a concise medical research AI co-pilot.",
+                },
+                {
+                    "role": "user",
+                    "content": "Respond strictly with 'StatioMed AI Connected: Ready' and nothing else.",
+                },
+            ]
+            res = client.chat.completions.create(
+                model=target_model,
+                messages=test_messages,
+                max_tokens=25,
+                temperature=0.1,
+            )
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            content = res.choices[0].message.content if res.choices else ""
+            clean_reply = content.strip() if content else "Connected"
+            return (
+                True,
+                f"✅ Connected to Hugging Face AI ({target_model}) in {elapsed_ms}ms! Response: {clean_reply}",
+                {
+                    "model": target_model,
+                    "elapsed_ms": elapsed_ms,
+                    "response": clean_reply,
+                    "provider": provider or "auto",
+                },
+            )
+        except Exception as e:
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            err_str = str(e)
+            logger.warning("HF connection test failed: %s", err_str)
+            return (
+                False,
+                f"❌ Hugging Face API connection failed ({elapsed_ms}ms): {err_str}",
+                {"model": target_model, "elapsed_ms": elapsed_ms, "error": err_str},
+            )
 
     @classmethod
     def chat_completion(
@@ -695,36 +873,52 @@ class ClinicalAgentRunner:
         messages: list[dict[str, str]],
         max_tokens: int = 1500,
         temperature: float = 0.3,
+        model_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        token: Optional[str] = None,
     ) -> Optional[str]:
         """
         Executes a chat completion call via Hugging Face InferenceClient.
         Returns generated text or None if unconfigured / failed.
         """
-        token = cls.get_token()
-        if not token or not HAS_HF_HUB:
+        resolved_token = cls.get_token(token)
+        if not resolved_token or not HAS_HF_HUB or InferenceClient is None:
             return None
 
+        target_model = resolve_hf_model_id(model_id)
+        provider = provider or os.getenv("HF_INFERENCE_PROVIDER", None)
+
         try:
-            client = InferenceClient(token=token, timeout=30.0)
-            model_id = cls.get_model_id()
+            client = InferenceClient(
+                token=resolved_token,
+                provider=provider if provider != "auto" else None,
+                timeout=45.0,
+            )
             res = client.chat.completions.create(
-                model=model_id,
+                model=target_model,
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
-            content = res.choices[0].message.content
+            content = res.choices[0].message.content if res.choices else None
             return content.strip() if content else None
         except Exception as e:
-            logger.warning("Hugging Face InferenceClient error: %s", e)
+            logger.warning(
+                "Hugging Face InferenceClient error (%s): %s", target_model, e
+            )
             return None
 
     @classmethod
-    def extract_biomedical_search_terms(cls, user_query: str) -> str:
+    def extract_biomedical_search_terms(
+        cls,
+        user_query: str,
+        model_id: Optional[str] = None,
+        token: Optional[str] = None,
+    ) -> str:
         """
         Translates or extracts precise English MeSH/biomedical search terms from user inquiry.
         """
-        if not cls.is_llm_available():
+        if not cls.is_llm_available(token):
             return user_query
 
         prompt = (
@@ -741,7 +935,9 @@ class ClinicalAgentRunner:
             },
             {"role": "user", "content": prompt},
         ]
-        result = cls.chat_completion(messages, max_tokens=60, temperature=0.1)
+        result = cls.chat_completion(
+            messages, max_tokens=60, temperature=0.1, model_id=model_id, token=token
+        )
         if result:
             clean_res = re.sub(r"[^\w\s-]", "", result).strip()
             if clean_res:
@@ -753,11 +949,13 @@ class ClinicalAgentRunner:
         cls,
         clinical_topic: str,
         articles: list[dict[str, Any]],
+        model_id: Optional[str] = None,
+        token: Optional[str] = None,
     ) -> Optional[str]:
         """
         Uses LLM to synthesize 5 tailored, publication-standard clinical study designs (SAMPL & EQUATOR compliant).
         """
-        if not cls.is_llm_available():
+        if not cls.is_llm_available(token):
             return None
 
         lit_summary = ""
@@ -796,7 +994,9 @@ Format output in professional, publication-ready English Markdown.
             {"role": "system", "content": CLINICAL_TECH_LEAD_SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ]
-        return cls.chat_completion(messages, max_tokens=2500, temperature=0.4)
+        return cls.chat_completion(
+            messages, max_tokens=2500, temperature=0.4, model_id=model_id, token=token
+        )
 
     @classmethod
     def consult_llm(
@@ -804,11 +1004,13 @@ Format output in professional, publication-ready English Markdown.
         user_query: str,
         articles: list[dict[str, Any]],
         session_context: str = "",
+        model_id: Optional[str] = None,
+        token: Optional[str] = None,
     ) -> Optional[str]:
         """
         Executes a deep clinical consultation turn using the LLM agent.
         """
-        if not cls.is_llm_available():
+        if not cls.is_llm_available(token):
             return None
 
         lit_summary = ""
@@ -830,35 +1032,47 @@ Provide expert clinical tech lead consultation. Ensure all statistical guidance 
             {"role": "system", "content": CLINICAL_TECH_LEAD_SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ]
-        return cls.chat_completion(messages, max_tokens=1800, temperature=0.3)
+        return cls.chat_completion(
+            messages, max_tokens=1800, temperature=0.3, model_id=model_id, token=token
+        )
 
 
-def get_model(backend: Optional[str] = None):
+def get_model(
+    backend: Optional[str] = None,
+    model_id: Optional[str] = None,
+    token: Optional[str] = None,
+):
     """
-    Initializes HfApiModel with appropriate backend and token authentication.
+    Initializes InferenceClientModel with appropriate backend and token authentication.
     """
     backend = backend or os.getenv("LLM_BACKEND", "inference-providers")
-    token = os.getenv("HF_TOKEN")
+    resolved_token = ClinicalAgentRunner.get_token(token)
+    resolved_model = resolve_hf_model_id(model_id) if model_id else None
 
     if backend == "zerogpu-local":
-        return HfApiModel(
-            model_id=os.getenv("LOCAL_MODEL_ID", "Qwen/Qwen2.5-14B-Instruct-AWQ"),
-            token=token,
+        return InferenceClientModel(
+            model_id=resolved_model
+            or os.getenv("LOCAL_MODEL_ID", "Qwen/Qwen2.5-14B-Instruct-AWQ"),
+            token=resolved_token,
         )
     elif backend == "inference-providers":
-        return HfApiModel(
-            model_id=os.getenv("PROVIDER_MODEL_ID", "Qwen/Qwen2.5-72B-Instruct"),
+        return InferenceClientModel(
+            model_id=resolved_model
+            or os.getenv("PROVIDER_MODEL_ID", "Qwen/Qwen2.5-72B-Instruct"),
             provider=os.getenv("HF_INFERENCE_PROVIDER", "together"),
-            token=token,
+            token=resolved_token,
         )
     else:
-        return HfApiModel(model_id="Qwen/Qwen2.5-72B-Instruct", token=token)
+        return InferenceClientModel(
+            model_id=resolved_model or "Qwen/Qwen2.5-72B-Instruct", token=resolved_token
+        )
 
 
 def create_clinical_agent(
     backend: Optional[str] = None,
     tools: Optional[List[Any]] = None,
     state_df_provider: Optional[Any] = None,
+    ncbi_api_key: Optional[str] = None,
 ) -> ToolCallingAgent:
     """
     Factory function to initialize a ToolCallingAgent with clinical tools and system prompt.
@@ -878,7 +1092,7 @@ def create_clinical_agent(
 
     if tools is None:
         tools = [
-            PubMedEvidenceTool(),
+            PubMedEvidenceTool(api_key=ncbi_api_key),
             SampleSizeTool(),
             SyntheticDataTool(),
             SurvivalAnalysisTool(state_df_provider=state_df_provider),
