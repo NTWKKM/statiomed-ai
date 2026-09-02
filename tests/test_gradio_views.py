@@ -278,6 +278,8 @@ def test_ai_copilot_controls_interactivity():
 
 def test_settings_view_actions(monkeypatch, tmp_path):
     """Verify settings save and HF connection test actions in Gradio Settings tab."""
+    import os
+
     import gradio as gr
 
     from core.state import AppState
@@ -298,33 +300,26 @@ def test_settings_view_actions(monkeypatch, tmp_path):
     assert "btn_test_hf" in components
     assert "btn_save" in components
 
-    # Test update settings action
+    # Test update settings action stores credentials in AppState
     save_html = update_settings_action(
         ncbi_key="test_ncbi", hf_token="hf_test_123", state=state
     )
     assert "Settings updated successfully" in save_html
+    assert state.ncbi_api_key == "test_ncbi"
     assert state.hf_token == "hf_test_123"
 
-    # Test individual credential update preserving existing .env keys
+    # Verify no process-global os.environ or .env side effects occur
+    assert os.getenv("NCBI_API_KEY") is None
+    assert os.getenv("HF_TOKEN") is None
+    assert not (tmp_path / ".env").exists()
+
+    # Test updating one credential updates only that field in AppState
     save_ncbi_only = update_settings_action(
-        ncbi_key="new_ncbi_key", hf_token="", state=state
+        ncbi_key="new_ncbi_key", hf_token="hf_test_123", state=state
     )
     assert "Settings updated successfully" in save_ncbi_only
-    env_content = (tmp_path / ".env").read_text(encoding="utf-8")
-    assert "NCBI_API_KEY=new_ncbi_key" in env_content
-    assert "HF_TOKEN=hf_test_123" in env_content
-
-    # Test error handling when writing to .env fails
-    from unittest.mock import patch
-
-    with patch(
-        "views.view_settings.Path.write_text",
-        side_effect=OSError("Read-only filesystem"),
-    ):
-        fail_html = update_settings_action(
-            ncbi_key="fail_key", hf_token="fail_token", state=state
-        )
-        assert "Failed to persist settings" in fail_html
+    assert state.ncbi_api_key == "new_ncbi_key"
+    assert state.hf_token == "hf_test_123"
 
     # Test HF connection test action (mocked)
     from unittest.mock import MagicMock

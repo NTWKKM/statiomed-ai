@@ -97,14 +97,22 @@ SUPPORTED_HF_MODELS: dict[str, str] = {
 }
 
 
+DEFAULT_HF_MODEL_ID = "Qwen/Qwen2.5-72B-Instruct"
+
+
 def resolve_hf_model_id(model_name_or_alias: Optional[str] = None) -> str:
     """
     Resolves UI labels, aliases, or environment variables to canonical Hugging Face Model IDs.
     """
-    if not model_name_or_alias:
-        return os.getenv("HF_MODEL_ID", "Qwen/Qwen2.5-72B-Instruct")
+    raw = (
+        model_name_or_alias
+        if model_name_or_alias and model_name_or_alias.strip()
+        else os.getenv("HF_MODEL_ID")
+    )
+    if not raw or not raw.strip():
+        return DEFAULT_HF_MODEL_ID
 
-    trimmed = model_name_or_alias.strip()
+    trimmed = raw.strip()
     if "/" in trimmed:
         return trimmed
 
@@ -118,7 +126,7 @@ def resolve_hf_model_id(model_name_or_alias: Optional[str] = None) -> str:
     elif "mistral" in clean:
         return "mistralai/Mistral-Small-24B-Instruct-2501"
 
-    return os.getenv("HF_MODEL_ID", "Qwen/Qwen2.5-72B-Instruct")
+    return DEFAULT_HF_MODEL_ID
 
 
 def _is_identifier_column(col_name: str) -> bool:
@@ -1064,6 +1072,7 @@ def create_clinical_agent(
     backend: Optional[str] = None,
     tools: Optional[List[Any]] = None,
     state_df_provider: Optional[Any] = None,
+    ncbi_api_key: Optional[str] = None,
 ) -> ToolCallingAgent:
     """
     Factory function to initialize a ToolCallingAgent with clinical tools and system prompt.
@@ -1083,7 +1092,7 @@ def create_clinical_agent(
 
     if tools is None:
         tools = [
-            PubMedEvidenceTool(),
+            PubMedEvidenceTool(api_key=ncbi_api_key),
             SampleSizeTool(),
             SyntheticDataTool(),
             SurvivalAnalysisTool(state_df_provider=state_df_provider),

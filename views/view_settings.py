@@ -1,6 +1,5 @@
 import html
 import os
-from pathlib import Path
 
 import gradio as gr
 
@@ -9,41 +8,12 @@ from core.state import AppState
 
 
 def update_settings_action(ncbi_key: str, hf_token: str, state: AppState) -> str:
-    """Action callback: Updates runtime API keys and environment variables, persisting to .env."""
-    updates: dict[str, str] = {}
-    if ncbi_key and ncbi_key.strip():
-        clean_ncbi = ncbi_key.strip()
-        os.environ["NCBI_API_KEY"] = clean_ncbi
-        updates["NCBI_API_KEY"] = clean_ncbi
+    """Action callback: Updates runtime API keys and credentials in session AppState."""
+    if ncbi_key is not None:
+        state.ncbi_api_key = ncbi_key.strip() or None
 
-    if hf_token and hf_token.strip():
-        clean_token = hf_token.strip()
-        os.environ["HF_TOKEN"] = clean_token
-        state.hf_token = clean_token
-        updates["HF_TOKEN"] = clean_token
-
-    if updates:
-        try:
-            env_path = Path(".env")
-            existing_lines: list[str] = []
-            if env_path.exists():
-                existing_lines = env_path.read_text(encoding="utf-8").splitlines()
-
-            lines = [
-                line
-                for line in existing_lines
-                if not any(line.startswith(f"{k}=") for k in updates)
-            ]
-            for k, v in updates.items():
-                lines.append(f"{k}={v}")
-
-            env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        except Exception as e:
-            return f"""
-    <div style='background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:12px;border-radius:8px;'>
-        ❌ Failed to persist settings: {html.escape(str(e))}
-    </div>
-    """
+    if hf_token is not None:
+        state.hf_token = hf_token.strip() or None
 
     return """
     <div style='background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:12px;border-radius:8px;'>

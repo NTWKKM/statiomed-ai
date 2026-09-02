@@ -42,8 +42,9 @@ class AppState:
     last_analysis_results: dict[str, Any] = field(default_factory=dict)
     last_critique_md: str | None = None
 
-    # Hugging Face AI Session Settings
+    # Hugging Face AI Session Settings & External APIs
     hf_token: str | None = None
+    ncbi_api_key: str | None = None
     active_model: str = "Qwen 2.5 72B (Hugging Face)"
 
     def has_data(self) -> bool:

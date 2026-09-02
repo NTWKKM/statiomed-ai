@@ -51,13 +51,18 @@ class PubMedEvidenceTool(Tool):
 
     BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
-    def __init__(self, email: Optional[str] = None, tool_name: Optional[str] = None):
+    def __init__(
+        self,
+        email: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ):
         super().__init__()
         self.tool_name = tool_name or os.getenv("NCBI_TOOL_NAME", "StatioMedAI")
         self.email = email or os.getenv(
             "NCBI_CONTACT_EMAIL", "research-lead@hospital.example"
         )
-        self.api_key = os.getenv("NCBI_API_KEY")
+        self.api_key = api_key or os.getenv("NCBI_API_KEY")
         self.min_interval = (
             0.10 if self.api_key else 0.34
         )  # ~10 req/s with key, 3 req/s without

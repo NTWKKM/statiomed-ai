@@ -309,8 +309,8 @@ def test_psm_covariates_exclude_endpoints_and_outcomes():
     )
 
 
-def test_resolve_hf_model_id():
-    from agent.agent_runner import resolve_hf_model_id
+def test_resolve_hf_model_id(monkeypatch):
+    from agent.agent_runner import DEFAULT_HF_MODEL_ID, resolve_hf_model_id
 
     assert (
         resolve_hf_model_id("Qwen 2.5 72B (Hugging Face)")
@@ -334,6 +334,20 @@ def test_resolve_hf_model_id():
         == "custom-org/my-qwen-custom-v1"
     )
     assert resolve_hf_model_id("org/llama-3-custom") == "org/llama-3-custom"
+
+    # Test HF_MODEL_ID env var with trimming and alias resolution
+    monkeypatch.setenv("HF_MODEL_ID", "  mistral-24b  ")
+    assert resolve_hf_model_id() == "mistralai/Mistral-Small-24B-Instruct-2501"
+
+    monkeypatch.setenv("HF_MODEL_ID", "  custom-repo/llama-finetuned  ")
+    assert resolve_hf_model_id() == "custom-repo/llama-finetuned"
+
+    monkeypatch.setenv("HF_MODEL_ID", "   ")
+    assert resolve_hf_model_id() == DEFAULT_HF_MODEL_ID
+
+    monkeypatch.delenv("HF_MODEL_ID", raising=False)
+    assert resolve_hf_model_id() == DEFAULT_HF_MODEL_ID
+    assert resolve_hf_model_id("unknown-display-label") == DEFAULT_HF_MODEL_ID
 
 
 def test_clinical_agent_runner_token_discovery(monkeypatch):
