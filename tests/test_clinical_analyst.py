@@ -426,10 +426,24 @@ def test_coerce_to_binary_series_extended():
     res_ambig = _coerce_to_binary_series(s_ambig, positive_val="Cohort_B")
     assert list(res_ambig) == [0, 1, 0]
 
-    # Negative tokens precedence (e.g., "non-event" vs "event")
+    # Negative tokens precedence (e.g., "non-event" vs "event", "-free" / "_free" vs positive words)
     s_event = pd.Series(["non-event", "event", "non-event", "event"])
     res_event = _coerce_to_binary_series(s_event)
     assert list(res_event) == [0, 1, 0, 1]
+
+    s_relapse = pd.Series(["relapse-free", "relapse", "relapse-free", "relapse"])
+    res_relapse = _coerce_to_binary_series(s_relapse)
+    assert list(res_relapse) == [0, 1, 0, 1]
+
+    s_recurrence = pd.Series(
+        ["recurrence_free", "recurrence", "recurrence_free", "recurrence"]
+    )
+    res_recurrence = _coerce_to_binary_series(s_recurrence)
+    assert list(res_recurrence) == [0, 1, 0, 1]
+
+    s_progression = pd.Series(["progression-free", "relapse"])
+    res_progression = _coerce_to_binary_series(s_progression)
+    assert list(res_progression) == [0, 1]
 
     # Single-value recognized tokens
     s_single_pos = pd.Series(["Dead", "Dead"])

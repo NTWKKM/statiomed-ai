@@ -174,6 +174,8 @@ def _coerce_to_binary_series(series: pd.Series, positive_val: Any = None) -> pd.
             or v.startswith("non_")
             or v.startswith("no ")
             or v.startswith("not ")
+            or v.endswith("-free")
+            or v.endswith("_free")
             or "non-event" in v
             or "non_event" in v
             or "nonevent" in v
