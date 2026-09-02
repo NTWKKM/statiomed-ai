@@ -276,7 +276,7 @@ def test_ai_copilot_controls_interactivity():
     assert components["btn_mic"].interactive is False
 
 
-def test_settings_view_actions(monkeypatch):
+def test_settings_view_actions(monkeypatch, tmp_path):
     """Verify settings save and HF connection test actions in Gradio Settings tab."""
     import gradio as gr
 
@@ -286,6 +286,10 @@ def test_settings_view_actions(monkeypatch):
         test_hf_connection_action,
         update_settings_action,
     )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("NCBI_API_KEY", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
 
     state = AppState()
     with gr.Blocks():
@@ -300,6 +304,27 @@ def test_settings_view_actions(monkeypatch):
     )
     assert "Settings updated successfully" in save_html
     assert state.hf_token == "hf_test_123"
+
+    # Test individual credential update preserving existing .env keys
+    save_ncbi_only = update_settings_action(
+        ncbi_key="new_ncbi_key", hf_token="", state=state
+    )
+    assert "Settings updated successfully" in save_ncbi_only
+    env_content = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "NCBI_API_KEY=new_ncbi_key" in env_content
+    assert "HF_TOKEN=hf_test_123" in env_content
+
+    # Test error handling when writing to .env fails
+    from unittest.mock import patch
+
+    with patch(
+        "views.view_settings.Path.write_text",
+        side_effect=OSError("Read-only filesystem"),
+    ):
+        fail_html = update_settings_action(
+            ncbi_key="fail_key", hf_token="fail_token", state=state
+        )
+        assert "Failed to persist settings" in fail_html
 
     # Test HF connection test action (mocked)
     from unittest.mock import MagicMock

@@ -329,6 +329,11 @@ def test_resolve_hf_model_id():
         == "mistralai/Mistral-Small-24B-Instruct-2501"
     )
     assert resolve_hf_model_id("custom-org/my-model-v1") == "custom-org/my-model-v1"
+    assert (
+        resolve_hf_model_id("custom-org/my-qwen-custom-v1")
+        == "custom-org/my-qwen-custom-v1"
+    )
+    assert resolve_hf_model_id("org/llama-3-custom") == "org/llama-3-custom"
 
 
 def test_clinical_agent_runner_token_discovery(monkeypatch):
@@ -349,6 +354,7 @@ def test_clinical_agent_runner_token_discovery(monkeypatch):
 
 def test_clinical_agent_runner_test_hf_connection(monkeypatch):
     from unittest.mock import MagicMock
+
     from agent.agent_runner import ClinicalAgentRunner
 
     # Case 1: No token
@@ -399,6 +405,7 @@ def test_clinical_agent_runner_test_hf_connection(monkeypatch):
 
 def test_clinical_agent_runner_chat_completion(monkeypatch):
     from unittest.mock import MagicMock
+
     from agent.agent_runner import ClinicalAgentRunner
 
     mock_choice = MagicMock()

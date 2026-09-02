@@ -37,17 +37,23 @@ except ImportError:
 
 
 try:
-    from huggingface_hub import InferenceClient, get_token as hf_get_token
+    from huggingface_hub import InferenceClient
+    from huggingface_hub import get_token as hf_get_token
 
     HAS_HF_HUB = True
 except ImportError:
     HAS_HF_HUB = False
     InferenceClient = None  # type: ignore
-    hf_get_token = lambda: None  # type: ignore
+
+    def hf_get_token() -> Optional[str]:  # type: ignore
+        return None
+
 
 try:
     from smolagents import (
         InferenceClientModel,
+    )
+    from smolagents import (
         ToolCallingAgent as SmolToolCallingAgent,
     )
 
@@ -57,8 +63,10 @@ except ImportError:
     try:
         from smolagents import (
             HfApiModel as InferenceClientModel,
-            ToolCallingAgent as SmolToolCallingAgent,
         )  # type: ignore
+        from smolagents import (
+            ToolCallingAgent as SmolToolCallingAgent,
+        )
 
         HAS_SMOLAGENTS = True
         HfApiModel = InferenceClientModel
@@ -96,7 +104,11 @@ def resolve_hf_model_id(model_name_or_alias: Optional[str] = None) -> str:
     if not model_name_or_alias:
         return os.getenv("HF_MODEL_ID", "Qwen/Qwen2.5-72B-Instruct")
 
-    clean = model_name_or_alias.strip().lower()
+    trimmed = model_name_or_alias.strip()
+    if "/" in trimmed:
+        return trimmed
+
+    clean = trimmed.lower()
     if "qwen" in clean:
         return "Qwen/Qwen2.5-72B-Instruct"
     elif "llama" in clean:
@@ -105,8 +117,6 @@ def resolve_hf_model_id(model_name_or_alias: Optional[str] = None) -> str:
         return "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
     elif "mistral" in clean:
         return "mistralai/Mistral-Small-24B-Instruct-2501"
-    elif "/" in model_name_or_alias:
-        return model_name_or_alias.strip()
 
     return os.getenv("HF_MODEL_ID", "Qwen/Qwen2.5-72B-Instruct")
 
